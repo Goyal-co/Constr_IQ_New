@@ -46,7 +46,31 @@ async function bootstrap(): Promise<void> {
   app.use(cookieParser());
 
   app.enableCors({
-    origin: corsOrigins,
+    /**
+     * Allowlist with a log line on every refusal.
+     *
+     * Passing the array straight to `origin` works, but a rejected request then
+     * produces silence on the server and a generic network error in the
+     * browser — the origin that was actually refused appears nowhere. Since a
+     * CORS misconfiguration is the single most common way this deployment
+     * breaks, the refusal names the origin and prints the current allowlist, so
+     * the fix is a copy-paste out of the log.
+     */
+    origin: (origin, callback) => {
+      // No Origin header: curl, server-to-server, and the platform's own health
+      // probe. CORS is a browser mechanism and does not apply to these.
+      if (!origin) return callback(null, true);
+
+      if (corsOrigins.includes(origin.replace(/\/+$/, ''))) return callback(null, true);
+
+      logger.warn(
+        `CORS refused ${origin} — add it to CORS_ORIGINS and redeploy. ` +
+          `Currently allowed: ${corsOrigins.join(', ') || '(empty)'}`,
+      );
+      // `false` omits the header, which is what makes the browser block it.
+      // An Error here would surface as a 500 and hide the real cause.
+      return callback(null, false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id'],

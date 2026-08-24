@@ -152,8 +152,12 @@ export function buildConfig(env: Env) {
     isProduction: env.NODE_ENV === 'production',
     port: env.PORT,
     apiPrefix: env.API_PREFIX,
+    // Trailing slashes are stripped because a browser's `Origin` header never
+    // has one, and the value here is almost always pasted from an address bar
+    // that does. `https://app.vercel.app/` would otherwise never match and the
+    // failure looks identical to not having set the variable at all.
     corsOrigins: env.CORS_ORIGINS.split(',')
-      .map((o) => o.trim())
+      .map((o) => o.trim().replace(/\/+$/, ''))
       .filter(Boolean),
     webAppUrl: env.WEB_APP_URL,
     database: { url: env.DATABASE_URL },
