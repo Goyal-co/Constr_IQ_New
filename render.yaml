@@ -1,0 +1,68 @@
+# Render blueprint for the API.
+#
+# The web client is on Vercel and the database is on Neon; this file describes
+# only the API service. Import it with Render -> New -> Blueprint.
+#
+# Deliberately no `databases:` block. Render's free Postgres is deleted after 30
+# days, which is a silent data-loss trap for a tracker somebody has started
+# putting real projects into. Neon's free tier does not expire, so DATABASE_URL
+# is left as a value you paste in.
+
+services:
+  - type: web
+    name: constructiq-api
+    runtime: docker
+
+    # The Dockerfile copies the root manifests and the shared package, so the
+    # build context has to be the repo root, not apps/api.
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+
+    plan: free
+    region: oregon
+
+    # Render polls this and holds a deploy back until it answers. It is the
+    # liveness probe, not the readiness one — /health/ready also touches the
+    # database, and gating the rollout on that turns a slow first connection
+    # into a failed deploy.
+    healthCheckPath: /api/v1/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Render generates these once and keeps them across deploys. They differ
+      # from each other, which the API requires: identical secrets would make a
+      # refresh token a valid access token. If the API refuses to boot
+      # complaining about length, replace them with 48 random bytes of your own.
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+
+      # `sync: false` means "ask me in the dashboard" — these are either secret
+      # or environment-specific, so they are not committed here.
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: WEB_APP_URL
+        sync: false
+
+      # Email is off until you set MAIL_DRIVER=brevo and supply a key.
+      - key: MAIL_DRIVER
+        value: log
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: MAIL_FROM_NAME
+        sync: false
+
+      # Off on the free plan. A free service is suspended after ~15 minutes
+      # without traffic, so the nightly risk sweep and the weekly digest would
+      # fire only when someone happened to be using the app — worse than not
+      # running at all, because the timing looks arbitrary rather than broken.
+      # Set this to true on a paid instance that stays warm.
+      - key: ENABLE_SCHEDULER
+        value: 'false'

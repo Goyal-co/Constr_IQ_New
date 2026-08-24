@@ -2,9 +2,10 @@
   "name": "@ciq/api",
   "version": "1.0.0",
   "private": true,
-  "description": "ConstructIQ Tracker API — NestJS + Prisma + PostgreSQL",
+  "description": "ConstructIQ Tracker API \u2014 NestJS + Prisma + PostgreSQL",
   "main": "dist/main.js",
   "scripts": {
+    "prebuild": "npm run build --workspace @ciq/shared",
     "build": "prisma generate && nest build",
     "dev": "prisma generate && nest start --watch",
     "start": "node dist/main.js",
@@ -47,6 +48,7 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pdfmake": "^0.2.15",
+    "prisma": "^6.1.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "zod": "^3.24.1"
@@ -66,7 +68,6 @@
     "@types/pdfmake": "^0.2.10",
     "@types/supertest": "^6.0.2",
     "jest": "^29.7.0",
-    "prisma": "^6.1.0",
     "supertest": "^7.0.0",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",

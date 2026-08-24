@@ -11,7 +11,15 @@ import {
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { Tone } from '@ciq/shared';
-import { IconAlert, IconCheck, IconChevronDown, IconFilter, IconInfo, IconTrash, IconX } from './Icons';
+import {
+  IconAlert,
+  IconCheck,
+  IconChevronDown,
+  IconFilter,
+  IconInfo,
+  IconTrash,
+  IconX,
+} from './Icons';
 
 /**
  * UI primitives.
@@ -594,7 +602,12 @@ export function DeleteButton({
   if (variant === 'button') {
     return (
       <>
-        <Button variant="danger-quiet" size="sm" disabled={disabled} onClick={() => setConfirming(true)}>
+        <Button
+          variant="danger-quiet"
+          size="sm"
+          disabled={disabled}
+          onClick={() => setConfirming(true)}
+        >
           <IconTrash size={14} />
           {title}
         </Button>

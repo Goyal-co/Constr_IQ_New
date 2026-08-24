@@ -25,8 +25,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
     // `id` is attached by the request-id middleware, which Express's own types
-     // know nothing about. Narrowing to the one property actually read is more
-     // honest than casting the whole request to `any`.
+    // know nothing about. Narrowing to the one property actually read is more
+    // honest than casting the whole request to `any`.
     const requestId = (request as Request & { id?: string }).id ?? undefined;
 
     const { status, body } = this.normalise(exception);

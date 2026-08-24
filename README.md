@@ -280,4 +280,5 @@ Stated plainly so nobody assumes otherwise:
 - **Mobile apps.** The web app is responsive; there is no native client.
 - **Non-Latin PDF export.** pdfmake uses the built-in fonts to keep the image
   small. Devanagari or Arabic output needs a font file embedded.
+
 # Constr_IQ_New

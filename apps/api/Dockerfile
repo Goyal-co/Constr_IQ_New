@@ -45,8 +45,11 @@ USER node
 
 EXPOSE 4000
 
+# Reads $PORT rather than hard-coding 4000. Most managed hosts inject their own
+# port and expect the process to bind it — Render uses 10000 — and a health check
+# pinned to 4000 reports every one of those containers as unhealthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "const p=process.env.PORT||4000;fetch('http://127.0.0.1:'+p+'/api/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # dumb-init reaps zombies and forwards SIGTERM, so graceful shutdown works.
 ENTRYPOINT ["dumb-init", "--"]

@@ -202,7 +202,6 @@
   --shadow-lg: 0 4px 8px rgb(16 24 40 / 6%), 0 12px 28px rgb(16 24 40 / 10%);
   --shadow-xl: 0 8px 16px rgb(16 24 40 / 8%), 0 24px 56px rgb(16 24 40 / 14%);
 
-
   /* --- Chart palette -------------------------------------------------------
      Project-status series, in the fixed order Discussion → In Progress →
      On Hold → Completed. Assigned in that order and never cycled.
@@ -296,7 +295,6 @@
   --shadow-md: 0 4px 12px rgb(0 0 0 / 45%);
   --shadow-lg: 0 12px 32px rgb(0 0 0 / 55%);
   --shadow-xl: 0 24px 60px rgb(0 0 0 / 65%);
-
 
   /* Chosen against the dark surface, not flipped from the light steps: a flip
      lands outside the L 0.48–0.67 band and collapses the CVD separation. */

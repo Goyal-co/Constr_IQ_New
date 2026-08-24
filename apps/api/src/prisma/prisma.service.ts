@@ -34,9 +34,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   async onModuleInit(): Promise<void> {
     // `$on` is typed off the generic log-level union the client was constructed
-     // with, and that union is not visible through the subclass. One narrow
-     // local type describing the three subscriptions actually made beats three
-     // `any` casts — a typo in an event name is still caught.
+    // with, and that union is not visible through the subclass. One narrow
+    // local type describing the three subscriptions actually made beats three
+    // `any` casts — a typo in an event name is still caught.
     const events = this as unknown as {
       $on(event: 'warn' | 'error', handler: (e: Prisma.LogEvent) => void): void;
       $on(event: 'query', handler: (e: Prisma.QueryEvent) => void): void;

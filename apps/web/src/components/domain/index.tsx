@@ -243,8 +243,8 @@ export function ProjectCard({
           message={
             <>
               <strong>{project.name}</strong> and everything inside it — design files, work items,
-              materials and attachments — will be removed from every view and report. This cannot
-              be undone from the app.
+              materials and attachments — will be removed from every view and report. This cannot be
+              undone from the app.
             </>
           }
           onCancel={() => setConfirming(false)}

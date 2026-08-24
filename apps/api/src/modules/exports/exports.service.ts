@@ -870,7 +870,12 @@ function statusBand(k: PortfolioReport['kpis']): Content[] {
 
     {
       columns: [
-        meter('Design', k.designPct, `${k.designComplete} of ${k.designTotal} issued`, CHART_DESIGN),
+        meter(
+          'Design',
+          k.designPct,
+          `${k.designComplete} of ${k.designTotal} issued`,
+          CHART_DESIGN,
+        ),
         meter(
           'Execution',
           k.executionPct,

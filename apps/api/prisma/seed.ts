@@ -125,7 +125,9 @@ async function main(): Promise<void> {
     prisma.project.count({ where: { organisationId: organisation.id } }),
   ]);
 
-  console.log(`\n  Users ${users} · Categories ${categories} · Templates ${templates} · Projects ${projects}`);
+  console.log(
+    `\n  Users ${users} · Categories ${categories} · Templates ${templates} · Projects ${projects}`,
+  );
 
   if (!existingOwner) {
     console.log(`\nSign in as:\n\n  ${OWNER_EMAIL}\n  ${OWNER_PASSWORD}\n`);

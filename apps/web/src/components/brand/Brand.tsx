@@ -146,7 +146,13 @@ export function BrandLogo({
  * Falls back to the inline glyph rather than squashing the wide lockup, which
  * would render it unreadably small in a 30px slot.
  */
-export function BrandMark({ size = 32, surface = 'auto' }: { size?: number; surface?: BrandSurface }) {
+export function BrandMark({
+  size = 32,
+  surface = 'auto',
+}: {
+  size?: number;
+  surface?: BrandSurface;
+}) {
   const mark = useResolvedAsset(MARK_CANDIDATES);
 
   if (mark.url) {

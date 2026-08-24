@@ -163,8 +163,7 @@ export function PortfolioSnapshot({
 
         {next && (
           <p className="snapshot-next">
-            Nearest handover{' '}
-            <b>{next.projectName}</b>{' '}
+            Nearest handover <b>{next.projectName}</b>{' '}
             <span
               style={{
                 color:
@@ -209,7 +208,10 @@ function Meter({
         aria-label={`${label} ${pct}% — ${detail}`}
         title={`${label}: ${detail}`}
       >
-        <span className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: colour }} />
+        <span
+          className="meter-fill"
+          style={{ width: `${Math.max(0, Math.min(100, pct))}%`, background: colour }}
+        />
       </div>
       <div className="text-2xs text-tertiary" style={{ marginTop: 3 }}>
         {detail}

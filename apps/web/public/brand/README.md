@@ -17,7 +17,7 @@ change, no rebuild config. The file is scaled to fit, preserving aspect ratio.
 | --------------- | -------- | ----------------------------------------------- |
 | `logo.svg`      | no       | Overrides the inline lockup wherever it appears |
 | `logo-dark.svg` | no       | Dark theme, if present                          |
-| `mark.svg`      | no       | Collapsed sidebar and mobile header, if present  |
+| `mark.svg`      | no       | Collapsed sidebar and mobile header, if present |
 
 ### If your logo is solid black
 
