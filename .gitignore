@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+.vercel
+.turbo
+apps/api/uploads/
+apps/web/dist/
+apps/api/dist/
+packages/shared/dist/
+prisma/*.db

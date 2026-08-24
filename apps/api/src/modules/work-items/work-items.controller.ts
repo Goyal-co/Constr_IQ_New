@@ -1,0 +1,100 @@
+import { Body, Controller, Delete, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  bulkDesignSchema,
+  createWorkItemSchema,
+  reorderSchema,
+  updateWorkItemSchema,
+  type BulkDesignDto,
+  type CreateWorkItemDto,
+  type ReorderDto,
+  type UpdateWorkItemDto,
+} from '@ciq/shared';
+import {
+  ClientInfo,
+  CurrentUser,
+  RequirePermissions,
+  type AuthenticatedUser,
+  type ClientMeta,
+} from '../../common/auth-context';
+import { zodBody } from '../../common/pipes/zod-validation.pipe';
+import { WorkItemsService } from './work-items.service';
+
+/**
+ * Work items are created and edited through one set of routes because they are
+ * one row. The Design view sends `designComplete`; the Execution view sends
+ * status and dates. Neither view has an endpoint the other lacks.
+ */
+@ApiTags('Work items')
+@Controller('projects/:projectId/work-items')
+export class WorkItemsController {
+  constructor(private readonly workItems: WorkItemsService) {}
+
+  @Post()
+  @RequirePermissions('activity:create')
+  @ApiOperation({
+    summary: 'Add a work item to a phase — appears in both Design and Execution',
+  })
+  create(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Body(zodBody(createWorkItemSchema)) dto: CreateWorkItemDto,
+    @ClientInfo() client: ClientMeta,
+  ) {
+    return this.workItems.create(actor, projectId, dto, client);
+  }
+
+  @Patch('bulk-design')
+  @RequirePermissions('drawing:update')
+  @ApiOperation({ summary: 'Mark the design track complete for a whole phase' })
+  bulkDesign(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Body(zodBody(bulkDesignSchema)) dto: BulkDesignDto,
+    @ClientInfo() client: ClientMeta,
+  ) {
+    return this.workItems.setPhaseDesign(actor, projectId, dto, client);
+  }
+
+  @Patch('reorder')
+  @RequirePermissions('activity:update')
+  @ApiOperation({ summary: 'Reorder work items' })
+  reorder(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Body(zodBody(reorderSchema)) dto: ReorderDto,
+  ) {
+    return this.workItems.reorder(actor, projectId, dto.ids);
+  }
+
+  @Patch(':id')
+  @RequirePermissions('activity:update')
+  @ApiOperation({ summary: 'Update the design track, the execution track, or both' })
+  @ApiResponse({
+    status: 409,
+    description:
+      'Returned when completing an item that still has undelivered materials linked to it. ' +
+      'The response names them.',
+  })
+  update(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(zodBody(updateWorkItemSchema)) dto: UpdateWorkItemDto,
+    @ClientInfo() client: ClientMeta,
+  ) {
+    return this.workItems.update(actor, projectId, id, dto, client);
+  }
+
+  @Delete(':id')
+  @RequirePermissions('activity:delete')
+  @ApiOperation({ summary: 'Remove a work item. Linked materials are unlinked, not deleted.' })
+  remove(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @ClientInfo() client: ClientMeta,
+  ) {
+    return this.workItems.remove(actor, projectId, id, client);
+  }
+}

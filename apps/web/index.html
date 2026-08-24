@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="Project, drawing, procurement and execution tracking for interior fit-out delivery." />
+    <meta name="color-scheme" content="light dark" />
+    <!-- Tints the browser chrome on mobile to match the app surface. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8fa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d111b" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Goyal &amp; Co. | Hariyana Group — Project Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Applied before first paint so a dark-mode user never sees a white flash.
+      (function () {
+        try {
+          var stored = localStorage.getItem('ciq.theme');
+          var dark = stored
+            ? stored === 'dark'
+            : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.classList.add(dark ? 'theme-dark' : 'theme-light');
+        } catch (e) {
+          document.documentElement.classList.add('theme-light');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+{
+  // The seed lives outside src/ so it never ships in the built image, but it
+  // still needs compiling for ts-node. A separate project keeps it out of the
+  // application's rootDir without excluding it from type checking entirely.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true
+  },
+  "include": ["prisma/**/*.ts", "src/**/*.ts"]
+}

@@ -1,0 +1,87 @@
+# Local development stack.
+#
+# Production runs the web on Vercel, the API on Railway and Postgres on Neon —
+# this file exists so a developer can reproduce all four services on a laptop
+# with `npm run db:up` and no cloud accounts.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ciq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ciq
+      POSTGRES_PASSWORD: ciq_dev_password
+      POSTGRES_DB: constructiq
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ciq -d constructiq']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ciq-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - '6380:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # S3-compatible object storage for attachments. In production this is swapped
+  # for real S3 or Cloudflare R2 by changing S3_ENDPOINT alone.
+  minio:
+    image: minio/minio:latest
+    container_name: ciq-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ciq_minio
+      MINIO_ROOT_PASSWORD: ciq_minio_password
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Creates the attachments bucket once MinIO is healthy, then exits.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ciq_minio ciq_minio_password &&
+      mc mb --ignore-existing local/ciq-attachments &&
+      echo 'bucket ready'
+      "
+
+  # Captures outbound mail so digest templates can be inspected without sending.
+  mailhog:
+    image: axllent/mailpit:latest
+    container_name: ciq-mailhog
+    restart: unless-stopped
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

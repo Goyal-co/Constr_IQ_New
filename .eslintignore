@@ -1,0 +1,13 @@
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Generated
+node_modules/
+apps/api/prisma/generated/
+apps/api/src/generated/
+
+# Vendored or non-source
+public/

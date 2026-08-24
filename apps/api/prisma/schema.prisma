@@ -1,0 +1,563 @@
+// ConstructIQ Tracker — data model
+//
+// Design notes that are easy to lose later:
+//
+//   * Nothing an organisation would want to rename is an enum. Phases, categories
+//     and checklist templates are rows, so "Design / Civil / Finishing" is one
+//     customer's configuration rather than the product's opinion. The enums that
+//     remain (ProjectStatus, ActivityStatus, MaterialStatus) each drive engine
+//     behaviour and are deliberately closed.
+//
+//   * Tunable numbers — risk thresholds, lead-time warning windows, progress
+//     weights — live in `Organisation.settings` as JSON, validated on write by
+//     the shared zod schema. JSON rather than columns so adding a setting needs
+//     no migration and an older row simply inherits the default.
+//
+//   * Calendar facts (handover, planned, actual) are `@db.Date`, not timestamps.
+//     A handover date has no time zone; storing it as one makes a site engineer
+//     in IST and a server in UTC disagree about whether an order is a day late.
+//
+//   * Projects soft-delete via `deletedAt` so the audit trail keeps referring to
+//     something real.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums — closed sets that carry behaviour
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ADMIN
+  PROJECT_MANAGER
+  SITE_ENGINEER
+  CONSULTANT
+  VIEWER
+}
+
+enum ProjectStatus {
+  DISCUSSION
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+}
+
+enum ActivityStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  DONE
+  BLOCKED
+}
+
+enum MaterialStatus {
+  PENDING
+  ORDERED
+  DELIVERED
+  CANCELLED
+}
+
+enum TemplateItemKind {
+  DESIGN_FILE
+  WORK_ITEM
+  MATERIAL
+}
+
+enum AttachmentKind {
+  DRAWING
+  PHOTO
+  PURCHASE_ORDER
+  DOCUMENT
+}
+
+enum AttachmentEntity {
+  PROJECT
+  DESIGN_FILE
+  MATERIAL
+  WORK_ITEM
+}
+
+enum NotificationKind {
+  MATERIAL_OVERDUE
+  MATERIAL_DUE_SOON
+  ACTIVITY_SLIPPED
+  PROJECT_AT_RISK
+  PROJECT_ASSIGNED
+  HANDOVER_APPROACHING
+  MENTION
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & identity
+// ---------------------------------------------------------------------------
+
+model Organisation {
+  id      String  @id @default(uuid()) @db.Uuid
+  name    String  @db.VarChar(120)
+  slug    String  @unique @db.VarChar(120)
+  logoUrl String?
+
+  /// Every tunable number in the engine — risk thresholds, the lead-time warning
+  /// window, activity progress weights, locale, digest schedule. Shape is
+  /// `OrganisationSettings` from @ciq/shared; missing keys inherit defaults.
+  settings Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users         User[]
+  categories    Category[]
+  phases        Phase[]
+  templates     Template[]
+  projects      Project[]
+  attachments   Attachment[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  invitations   Invitation[]
+  reportSetting ReportSetting?
+
+  @@map("organisations")
+}
+
+model User {
+  id                 String    @id @default(uuid()) @db.Uuid
+  organisationId     String    @db.Uuid
+  email              String    @db.VarChar(255)
+  name               String    @db.VarChar(120)
+  passwordHash       String
+  role               Role      @default(VIEWER)
+  avatarUrl          String?
+  isActive           Boolean   @default(true)
+  /// Set when an administrator forces a reset; blocks login until changed.
+  mustChangePassword Boolean   @default(false)
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  organisation       Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  refreshTokens      RefreshToken[]
+  managedProjects    Project[]       @relation("ProjectManager")
+  projectMemberships ProjectMember[]
+  completedFiles     DesignFile[]    @relation("DesignFileCompletedBy")
+  designedItems      WorkItem[]      @relation("WorkItemDesignedBy")
+  assignedWorkItems  WorkItem[]      @relation("WorkItemAssignee")
+  uploads            Attachment[]
+  auditLogs          AuditLog[]
+  notifications      Notification[]
+  sentInvitations    Invitation[]    @relation("InvitedBy")
+  reportEdits        ReportSetting[] @relation("ReportUpdatedBy")
+
+  // Email is unique per tenant, not globally — the same person may belong to two
+  // organisations with separate credentials.
+  @@unique([organisationId, email])
+  @@index([organisationId, isActive])
+  @@index([email])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  /// SHA-256 of the token. The raw value never touches the database.
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?   @db.VarChar(400)
+  ipAddress String?   @db.VarChar(64)
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model Invitation {
+  id             String    @id @default(uuid()) @db.Uuid
+  organisationId String    @db.Uuid
+  email          String    @db.VarChar(255)
+  name           String    @db.VarChar(120)
+  role           Role
+  tokenHash      String    @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  invitedById    String    @db.Uuid
+  createdAt      DateTime  @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("InvitedBy", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([organisationId, email])
+  @@map("invitations")
+}
+
+// ---------------------------------------------------------------------------
+// Configuration — administrator-managed, no hard-coded lists anywhere
+// ---------------------------------------------------------------------------
+
+/// Project grouping: "Marketing Offices", "Clubhouse", or whatever this business
+/// actually builds. Created through the UI, never seeded by the product.
+model Category {
+  id             String   @id @default(uuid()) @db.Uuid
+  organisationId String   @db.Uuid
+  name           String   @db.VarChar(80)
+  description    String?  @db.VarChar(400)
+  position       Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  projects     Project[]
+
+  @@unique([organisationId, name])
+  @@index([organisationId, position])
+  @@map("categories")
+}
+
+/// A delivery phase. Name, colour and order are all data, so an organisation can
+/// run three phases or fifteen, named however their contracts describe them.
+model Phase {
+  id             String   @id @default(uuid()) @db.Uuid
+  organisationId String   @db.Uuid
+  name           String   @db.VarChar(80)
+  colour         String   @default("#3b6fe0") @db.VarChar(9)
+  position       Int      @default(0)
+  /// Archived phases stay referenced by historic rows but are hidden from pickers.
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation  Organisation   @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  workItems     WorkItem[]
+  materials     Material[]
+  templateItems TemplateItem[]
+
+  @@unique([organisationId, name])
+  @@index([organisationId, position])
+  @@map("phases")
+}
+
+/// A reusable project playbook. Applying one seeds a project's drawing checklist,
+/// activity list and material schedule from `TemplateItem` rows.
+model Template {
+  id             String   @id @default(uuid()) @db.Uuid
+  organisationId String   @db.Uuid
+  name           String   @db.VarChar(120)
+  description    String?  @db.VarChar(1000)
+  /// Pre-selected in the new-project form. At most one per organisation.
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation   @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  items        TemplateItem[]
+
+  @@unique([organisationId, name])
+  @@index([organisationId, isDefault])
+  @@map("templates")
+}
+
+model TemplateItem {
+  id         String           @id @default(uuid()) @db.Uuid
+  templateId String           @db.Uuid
+  /// Null for DESIGN_FILE rows - a document belongs to no work phase.
+  phaseId    String?          @db.Uuid
+  kind       TemplateItemKind
+  name       String           @db.VarChar(200)
+  position   Int              @default(0)
+
+  /// MATERIAL only — supplier lead time used to suggest an order-by date.
+  leadTimeWeeks Int?
+
+  /// WORK_ITEM only — days relative to the handover date, used to pre-fill
+  /// planned dates. Negative means before handover. Null leaves the item undated,
+  /// which keeps it off the programme chart until somebody schedules it.
+  offsetStartDays Int?
+  offsetEndDays   Int?
+
+  template Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  phase    Phase?   @relation(fields: [phaseId], references: [id], onDelete: Restrict)
+
+  @@index([templateId, kind, position])
+  @@index([phaseId])
+  @@map("template_items")
+}
+
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+model Project {
+  id             String        @id @default(uuid()) @db.Uuid
+  organisationId String        @db.Uuid
+  categoryId     String        @db.Uuid
+  name           String        @db.VarChar(160)
+  code           String?       @db.VarChar(32)
+  consultant     String?       @db.VarChar(160)
+  vendor         String?       @db.VarChar(160)
+  status         ProjectStatus @default(DISCUSSION)
+  /// Calendar date, no time zone. Null until the programme is fixed.
+  handoverDate   DateTime?     @db.Date
+  description    String?
+  siteAddress    String?       @db.VarChar(400)
+  budgetAmount   Decimal?      @db.Decimal(14, 2)
+  currency       String        @default("INR") @db.Char(3)
+  managerId      String?       @db.Uuid
+  /// Manual ordering within a category, as used by the board view.
+  position       Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+
+  organisation  Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  category      Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  manager       User?           @relation("ProjectManager", fields: [managerId], references: [id], onDelete: SetNull)
+  members       ProjectMember[]
+  designFiles   DesignFile[]
+  workItems     WorkItem[]
+  materials     Material[]
+  notifications Notification[]
+
+  @@unique([organisationId, code])
+  @@index([organisationId, deletedAt, status])
+  @@index([organisationId, categoryId, position])
+  @@index([organisationId, handoverDate])
+  @@map("projects")
+}
+
+model ProjectMember {
+  projectId   String   @db.Uuid
+  userId      String   @db.Uuid
+  projectRole String?  @db.VarChar(80)
+  addedAt     DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([userId])
+  @@map("project_members")
+}
+
+/// Design -> Design Files. A drawing or document.
+///
+/// Not phase-scoped and with no execution track: a document is issued, not built.
+model DesignFile {
+  id         String  @id @default(uuid()) @db.Uuid
+  projectId  String  @db.Uuid
+  name       String  @db.VarChar(200)
+  isComplete Boolean @default(false)
+  position   Int     @default(0)
+
+  /// When this document is due to be issued. A calendar date, entered directly.
+  expectedDate DateTime? @db.Date
+
+  /// Stamped the moment it is marked issued, and cleared if it is reopened.
+  /// A date rather than a timestamp so it compares against expectedDate cleanly.
+  completedDate DateTime? @db.Date
+
+  completedAt   DateTime?
+  completedById String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  completedBy User?   @relation("DesignFileCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+
+  @@index([projectId, position])
+  @@map("design_files")
+}
+
+/// The row behind BOTH Design -> {phase} and Execution -> {phase}.
+///
+/// One record, two independent completion tracks. Adding an item under
+/// Design -> Civil makes it appear under Execution -> Civil immediately, because
+/// there is no second row to keep in step.
+model WorkItem {
+  id        String  @id @default(uuid()) @db.Uuid
+  projectId String  @db.Uuid
+  phaseId   String  @db.Uuid
+  name      String  @db.VarChar(200)
+  position  Int     @default(0)
+  notes     String?
+
+  /// Design track: has the design for this been issued?
+  designComplete Boolean @default(false)
+
+  /// When the design is due, and when it actually landed. Both calendar dates,
+  /// so "three days late" is a subtraction rather than a timezone question.
+  designExpectedDate  DateTime? @db.Date
+  designCompletedDate DateTime? @db.Date
+
+  designCompletedAt DateTime?
+  designedById      String?   @db.Uuid
+
+  /// Execution track: has it been built on site?
+  executionStatus ActivityStatus @default(NOT_STARTED)
+
+  /// The programme is these four dates, per item. There is no global schedule
+  /// template at runtime - the Gantt is fitted to whatever exists here.
+  plannedStart DateTime? @db.Date
+  plannedEnd   DateTime? @db.Date
+  actualStart  DateTime? @db.Date
+  actualEnd    DateTime? @db.Date
+
+  assigneeId String?  @db.Uuid
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase      Phase      @relation(fields: [phaseId], references: [id], onDelete: Restrict)
+  designedBy User?      @relation("WorkItemDesignedBy", fields: [designedById], references: [id], onDelete: SetNull)
+  assignee   User?      @relation("WorkItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  /// Materials gating this item. While any is undelivered it cannot be Done.
+  materials  Material[]
+
+  @@index([projectId, phaseId, position])
+  @@index([projectId, executionStatus])
+  @@index([projectId, plannedEnd])
+  @@index([assigneeId])
+  @@index([phaseId])
+  @@map("work_items")
+}
+
+model Material {
+  id        String @id @default(uuid()) @db.Uuid
+  projectId String @db.Uuid
+  /// The tag. Constrains which work items may be linked.
+  phaseId   String @db.Uuid
+  name      String @db.VarChar(200)
+
+  /// The date this must be ordered by. Entered directly - the source of truth.
+  orderByDate DateTime? @db.Date
+
+  /// Optional convenience for calculating orderByDate back from handover.
+  /// Kept because a buyer often knows the lead time and not the date.
+  leadTimeWeeks Int?
+
+  status      MaterialStatus @default(PENDING)
+  supplier    String?        @db.VarChar(160)
+  poNumber    String?        @db.VarChar(64)
+  orderedAt   DateTime?      @db.Date
+  deliveredAt DateTime?      @db.Date
+  notes       String?
+  position    Int            @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  /// The execution work item this order gates. Nulled rather than cascaded if
+  /// the item goes, so a purchase record is never silently destroyed.
+  workItemId String? @db.Uuid
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase    Phase     @relation(fields: [phaseId], references: [id], onDelete: Restrict)
+  workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, phaseId, position])
+  @@index([projectId, status])
+  @@index([projectId, orderByDate])
+  @@index([workItemId])
+  @@index([phaseId])
+  @@map("materials")
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+model Attachment {
+  id             String           @id @default(uuid()) @db.Uuid
+  organisationId String           @db.Uuid
+  entityType     AttachmentEntity
+  entityId       String           @db.Uuid
+  kind           AttachmentKind   @default(DOCUMENT)
+  fileName       String           @db.VarChar(400)
+  /// Object-storage key. Files are never served through the API — clients get a
+  /// short-lived signed URL instead.
+  storageKey     String           @unique
+  mimeType       String           @db.VarChar(160)
+  sizeBytes      Int
+  checksum       String?          @db.VarChar(64)
+  uploadedById   String           @db.Uuid
+  createdAt      DateTime         @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([organisationId, entityType, entityId])
+  @@map("attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Audit & notifications
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id             String  @id @default(uuid()) @db.Uuid
+  organisationId String  @db.Uuid
+  actorId        String? @db.Uuid
+  action         String  @db.VarChar(60)
+  entityType     String  @db.VarChar(40)
+  entityId       String  @db.Uuid
+  /// Human-readable label captured at write time, so the log still reads well
+  /// after the underlying row is renamed or deleted.
+  entityLabel    String? @db.VarChar(300)
+  /// Array of { field, before, after }. Only changed fields are recorded.
+  changes        Json?
+  ipAddress      String? @db.VarChar(64)
+  userAgent      String? @db.VarChar(400)
+
+  createdAt DateTime @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organisationId, createdAt])
+  @@index([organisationId, entityType, entityId])
+  @@index([organisationId, actorId])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id             String           @id @default(uuid()) @db.Uuid
+  organisationId String           @db.Uuid
+  userId         String           @db.Uuid
+  kind           NotificationKind
+  title          String           @db.VarChar(200)
+  body           String           @db.VarChar(1000)
+  projectId      String?          @db.Uuid
+  isRead         Boolean          @default(false)
+  /// Stops the nightly sweep raising the same alert every run.
+  dedupeKey      String?          @db.VarChar(200)
+  createdAt      DateTime         @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+model ReportSetting {
+  organisationId String   @id @db.Uuid
+  title          String   @default("Portfolio Status Report") @db.VarChar(200)
+  commentary     String   @default("")
+  updatedById    String?  @db.Uuid
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  updatedBy    User?        @relation("ReportUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("report_settings")
+}

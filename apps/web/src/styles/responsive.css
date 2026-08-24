@@ -1,0 +1,565 @@
+/**
+ * Responsive and input-modality layer.
+ *
+ * Loaded after components.css so it can override without specificity games.
+ *
+ * Breakpoints are named after what breaks at them rather than after devices:
+ *
+ *   1100px  the sidebar stops fitting beside comfortable content
+ *    860px  the sidebar becomes an overlay
+ *    760px  data tables stop fitting and become stacked cards
+ *    560px  two-up layouts stop fitting
+ *
+ * There is no 768/1024 "tablet/desktop" ladder because the app does not care
+ * what a device calls itself — it cares whether a table still fits.
+ */
+
+/* ==========================================================================
+   Brand
+   ========================================================================== */
+
+.brand-logo,
+.brand-mark {
+  display: block;
+  max-width: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+
+/* The inline lockup is an <svg>, so it takes its height from the container and
+   scales its own width. Supplied artwork is an <img> and sizes itself. */
+.brand-logo--inline {
+  height: 100%;
+  width: auto;
+}
+
+/* The lockup is roughly 6:1, so in a narrow column it has to be sized by width.
+   Fixing its height instead is what pushed it past the sidebar edge. */
+.sidebar-brand-link {
+  width: 100%;
+}
+
+.sidebar-brand-link .brand-logo--inline,
+.sidebar-brand-link .brand-logo--raster {
+  width: 100%;
+  height: auto;
+  max-height: 52px;
+  object-fit: contain;
+}
+
+.auth-brand .brand-logo--inline,
+.auth-brand .brand-logo--raster {
+  width: min(100%, 400px);
+  height: auto;
+}
+
+/* The real lockup rather than a square mark, so the brand stays consistent
+   when the sidebar is collapsed. Capped by width because it is ~4:1. */
+.topbar-logo {
+  max-height: 30px;
+  max-width: min(150px, 42vw);
+  width: auto;
+  height: auto;
+}
+
+/* --- Knocking out a raster logo's background ------------------------------
+   Supplied artwork is usually black-on-white with no transparency — a JPEG has
+   none at all — so it shows as a white block on the dark sidebar.
+
+   `data-surface` says which ground it is actually on, which is not the same as
+   the theme: the sidebar stays dark in light mode too.
+
+   On a light ground, `multiply` drops white to the backdrop and leaves the black
+   artwork intact. On a dark ground the image is inverted first — white becomes
+   black, black becomes white — with a hue rotation to bring the amber and cyan
+   accents back, then `lighten` drops the now-black background.
+
+   A purpose-made transparent PNG or an SVG needs none of this and is preferred;
+   see public/brand/README.md. */
+.brand-logo--raster[data-surface='light'] {
+  mix-blend-mode: multiply;
+}
+
+.brand-logo--raster[data-surface='dark'] {
+  filter: invert(1) hue-rotate(180deg);
+  mix-blend-mode: lighten;
+}
+
+.brand-logo--raster[data-surface='auto'] {
+  mix-blend-mode: multiply;
+}
+
+.theme-dark .brand-logo--raster[data-surface='auto'] {
+  filter: invert(1) hue-rotate(180deg);
+  mix-blend-mode: lighten;
+}
+
+/* Blending needs the parent to actually paint the ground it blends against. */
+.sidebar-brand,
+.topbar {
+  isolation: auto;
+}
+
+.sidebar-brand-link {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  text-decoration: none;
+  border-radius: var(--radius-md);
+  /* Overrides the anchor's link colour, which the inline lockup would otherwise
+     inherit through currentColor and render blue. */
+  color: var(--nav-text-active);
+}
+
+.sidebar-brand-link:hover {
+  text-decoration: none;
+}
+
+/* ==========================================================================
+   Fluid type — the page title is the only thing that needs to breathe
+   ========================================================================== */
+
+.page-title {
+  font-size: clamp(1.375rem, 1.15rem + 1.1vw, 1.75rem);
+}
+
+.kpi-value {
+  font-size: clamp(1.5rem, 1.25rem + 1.2vw, 1.875rem);
+}
+
+/* ==========================================================================
+   Layout: content gutters scale with the viewport
+   ========================================================================== */
+
+.content {
+  padding-inline: clamp(var(--space-4), 2.5vw, var(--space-6));
+}
+
+.topbar {
+  padding-inline: clamp(var(--space-4), 2.5vw, var(--space-6));
+  /* Notched phones in landscape put the toolbar under the cutout. */
+  padding-left: max(clamp(var(--space-4), 2.5vw, var(--space-6)), env(safe-area-inset-left));
+  padding-right: max(clamp(var(--space-4), 2.5vw, var(--space-6)), env(safe-area-inset-right));
+}
+
+@media (max-width: 1100px) {
+  .shell {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+}
+
+/* --- Sidebar becomes an overlay ------------------------------------------ */
+
+@media (max-width: 860px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The drawer is parked off-canvas with a transform, and a transformed element
+     still contributes to the scrollable area — the page picked up a few pixels
+     of horizontal scroll with nothing visible in them. Clipped here rather than
+     on <body>, because clipping the body would also kill `position: sticky` on
+     the topbar. Wide content is not affected: tables scroll inside their own
+     `.scroll-x`, never against the page. */
+  .shell {
+    overflow-x: clip;
+  }
+
+  .sidebar {
+    width: min(300px, 86vw);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .content {
+    padding-bottom: calc(var(--space-12) + env(safe-area-inset-bottom));
+  }
+
+  /* The page header stacks: title first, actions beneath and full width, so
+     buttons are reachable with a thumb rather than pinned to a far corner. */
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-4);
+  }
+
+  .page-head .row {
+    width: 100%;
+  }
+}
+
+/* ==========================================================================
+   Tables → stacked cards
+   ==========================================================================
+   Below 760px a wide table either scrolls sideways, which hides columns behind
+   a gesture people miss, or squeezes into unreadable columns. Instead each row
+   becomes a card and every cell carries its own label from `data-label`.
+
+   Apply `.table-stack` to opt a table in. Cells without a data-label are
+   assumed to be controls and are laid out full width.
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  .table-stack,
+  .table-stack tbody,
+  .table-stack tr,
+  .table-stack td {
+    display: block;
+    width: 100%;
+  }
+
+  .table-stack thead {
+    /* Hidden visually; the per-cell labels carry the same information, so
+       nothing is lost for a screen reader either. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .table-stack tr {
+    margin-bottom: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xs);
+  }
+
+  .table-stack tr:hover {
+    background: var(--surface-raised);
+  }
+
+  .table-stack td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-2) 0;
+    border: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    text-align: left;
+  }
+
+  .table-stack td:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .table-stack td:first-child {
+    padding-top: 0;
+  }
+
+  .table-stack td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-size: var(--text-2xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+  }
+
+  /* A cell with no label is a control or an action — give it the full width. */
+  .table-stack td:not([data-label]) {
+    justify-content: flex-start;
+  }
+
+  .table-stack td.num {
+    text-align: left;
+  }
+
+  /* Inputs inside a stacked cell should not be pinned to a desktop width. */
+  .table-stack td .input,
+  .table-stack td .select {
+    width: auto;
+    min-width: 140px;
+    max-width: 60%;
+  }
+
+  /* Row actions are always visible on a card: there is no hover to reveal them. */
+  .table-stack .row-action {
+    opacity: 1;
+  }
+}
+
+/* ==========================================================================
+   Two-up layouts collapse
+   ========================================================================== */
+
+@media (max-width: 860px) {
+  .grid-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .grid-auto-sm,
+  .grid-auto-md,
+  .grid-auto-lg {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modal-foot {
+    flex-direction: column-reverse;
+  }
+
+  .modal-foot .btn {
+    width: 100%;
+  }
+
+  /* A sub-nav with four phases must not wrap into a ragged block. */
+  .subnav {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+/* ==========================================================================
+   Touch
+   ==========================================================================
+   Keyed off pointer capability rather than width: a 13" touchscreen laptop
+   needs the same target sizes as a phone, and a 320px-wide desktop window does
+   not.
+   ========================================================================== */
+
+@media (pointer: coarse) {
+  .btn {
+    min-height: 44px;
+  }
+
+  .btn-sm {
+    min-height: 38px;
+  }
+
+  .input,
+  .select,
+  .textarea {
+    min-height: 44px;
+    /* Anything under 16px makes iOS Safari zoom the viewport on focus. */
+    font-size: max(var(--text-base), 16px);
+  }
+
+  .input-sm,
+  .select.input-sm {
+    min-height: 38px;
+  }
+
+  .checkbox {
+    width: 24px;
+    height: 24px;
+  }
+
+  .subnav-item,
+  .filter-pill,
+  .tab {
+    min-height: 40px;
+  }
+
+  /* Row actions get a full touch target rather than a 30px one. */
+  .row-action {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Hover lift is meaningless and causes a sticky-looking state after a tap. */
+  .card-link:hover {
+    transform: none;
+  }
+}
+
+/* ==========================================================================
+   Filters on a narrow screen
+   ==========================================================================
+   The filter block on the project board is search + scope + sort + a category
+   pill row + a status pill row. On a phone that stacked to roughly 320px tall —
+   taller than the results it filters, so the first project card started below
+   the fold and the page opened on its own controls.
+
+   The fix is not to drop filters on mobile. It is to collapse them behind a
+   toggle that states how many are active, so the *state* stays visible even
+   when the controls are put away, and to scroll the pill rows sideways instead
+   of letting them wrap into five-line blocks.
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  .filter-bar {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .filter-bar-toggle {
+    display: inline-flex;
+  }
+
+  .filter-bar[data-open='false'] .filter-bar-panel {
+    display: none;
+  }
+
+  .filter-bar[data-open='true'] .filter-bar-panel {
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  /* Controls inside the panel go full width — a 150px select floating in a
+     360px column looks like a mistake, and is a smaller tap target than it
+     needs to be. */
+  .filter-bar-panel .select,
+  .filter-bar-panel .input,
+  .filter-bar-panel .segmented {
+    width: 100%;
+    max-width: none;
+  }
+
+  .filter-bar-panel .segmented button {
+    flex: 1 1 0;
+  }
+
+  /* One line, scrolled. The negative inline margin lets the row run to the
+     card's edge, so a half-cut pill at the boundary signals there is more —
+     a row that stops neatly at the padding looks complete. */
+  .filter-pills {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    margin-inline: calc(var(--space-4) * -1);
+    padding-inline: var(--space-4);
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .filter-pills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-pills > * {
+    scroll-snap-align: start;
+    flex: 0 0 auto;
+  }
+}
+
+/* ==========================================================================
+   Snapshot
+   ==========================================================================
+   Three columns divided by rules on desktop; stacked with the rules turned into
+   horizontal ones below. The bar keeps its full width at every size — it is the
+   one mark here that must stay readable, since its segments encode proportion.
+   ========================================================================== */
+
+@media (max-width: 1100px) {
+  .snapshot {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-5);
+  }
+
+  /* The status bar spans the full width; progress and exceptions sit under it. */
+  .snapshot-block:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .snapshot-block + .snapshot-block {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .snapshot-block:nth-child(2),
+  .snapshot-block:nth-child(3) {
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+
+@media (max-width: 640px) {
+  .snapshot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Two tiles per row is right at 640px and cramped at 380px — the label
+     ellipses before the number is read. One per row below that. */
+  .snapshot-flags {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ==========================================================================
+   Page header actions
+   ==========================================================================
+   Below 860px the header stacks and its action row goes full width. Buttons
+   then share that row equally rather than clustering at one edge, which puts
+   every one of them inside thumb reach.
+   ========================================================================== */
+
+@media (max-width: 560px) {
+  .page-head .row .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  /* An icon-only trigger must not stretch with them. */
+  .page-head .row .btn-icon,
+  .page-head .row .btn[aria-haspopup='true'] {
+    flex: 0 0 auto;
+  }
+
+  .breadcrumb {
+    font-size: var(--text-2xs);
+  }
+}
+
+/* ==========================================================================
+   Cards and modals on small screens
+   ========================================================================== */
+
+@media (max-width: 560px) {
+  .card-pad {
+    padding: var(--space-4);
+  }
+
+  /* A dialog pinned to the viewport centre with a fixed width leaves slivers of
+     backdrop at the sides on a phone; full-bleed with a top offset reads as a
+     sheet, which is the platform convention anyway. */
+  .overlay {
+    padding: 0;
+    align-items: end;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: none;
+    max-height: calc(100dvh - var(--space-10));
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .modal-foot {
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  }
+
+  .modal-body {
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  }
+}
+
+/* The stacked table already gives each row a card; a nested scroll container
+   around it then adds a second, useless scrollbar. */
+@media (max-width: 760px) {
+  .scroll-x:has(.table-stack) {
+    overflow-x: visible;
+  }
+}
+
+/* ==========================================================================
+   Print
+   ========================================================================== */
+
+@media print {
+  .subnav,
+  .add-row {
+    display: none !important;
+  }
+
+  .table-stack tr {
+    box-shadow: none;
+  }
+}

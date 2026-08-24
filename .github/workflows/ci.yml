@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # Cancel superseded runs on the same branch — the newest push is the one that matters.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  verify:
+    name: Typecheck, lint and unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # The API and web both compile against the shared package's build output,
+      # so it has to exist before anything else is typechecked.
+      - name: Build shared domain package
+        run: npm run build -w @ciq/shared
+
+      - name: Domain unit tests
+        run: npm run test -w @ciq/shared
+
+      - name: Generate Prisma client
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+
+      - name: Typecheck API
+        run: npx tsc -p apps/api/tsconfig.json --noEmit
+
+      - name: Typecheck web
+        run: npx tsc -p apps/web/tsconfig.json --noEmit
+
+      - name: Check formatting
+        run: npx prettier --check "**/*.{ts,tsx,json,md,css}"
+
+  integration:
+    name: Migrations and API boot
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ciq
+          POSTGRES_PASSWORD: ciq_test_password
+          POSTGRES_DB: constructiq_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ciq"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://ciq:ciq_test_password@localhost:5432/constructiq_test?schema=public
+      # Test-only values. Production secrets come from the platform, and the API
+      # refuses to boot with placeholder secrets when NODE_ENV=production.
+      JWT_ACCESS_SECRET: ci-access-secret-that-is-long-enough-for-validation
+      JWT_REFRESH_SECRET: ci-refresh-secret-that-is-long-enough-for-validation
+      STORAGE_DRIVER: local
+      MAIL_DRIVER: log
+      ENABLE_SCHEDULER: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build -w @ciq/shared
+
+      # Proves the committed migrations apply cleanly to an empty database —
+      # the failure mode that only shows up on a fresh environment otherwise.
+      - name: Apply migrations
+        run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+
+      - name: Verify schema matches migrations
+        run: npx prisma migrate diff --from-migrations apps/api/prisma/migrations --to-schema-datamodel apps/api/prisma/schema.prisma --shadow-database-url "$DATABASE_URL" --exit-code
+
+      - name: Build API
+        run: npm run build -w @ciq/api
+
+      - name: Boot API and check health
+        run: |
+          node apps/api/dist/main.js &
+          API_PID=$!
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:4000/api/v1/health > /dev/null; then
+              echo "API is healthy"
+              curl -fsS http://localhost:4000/api/v1/health/ready
+              kill $API_PID
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API failed to become healthy within 30 seconds"
+          kill $API_PID || true
+          exit 1
+
+  docker:
+    name: API image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

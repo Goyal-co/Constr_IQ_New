@@ -1,0 +1,322 @@
+/**
+ * Design tokens.
+ *
+ * One layer of primitives (raw scales) and one layer of semantic aliases that
+ * everything else consumes. Components reference only the semantic layer, so a
+ * theme change is a redefinition here rather than a search across the codebase.
+ *
+ * Dark mode redefines the semantic layer only. The primitive ramps stay put.
+ */
+
+:root {
+  /* --- Primitives: neutral ramp ------------------------------------------ */
+  --grey-0: #ffffff;
+  --grey-25: #fcfcfd;
+  --grey-50: #f7f8fa;
+  --grey-100: #eef0f4;
+  --grey-150: #e4e7ec;
+  --grey-200: #d6dae1;
+  --grey-300: #b9bfc9;
+  --grey-400: #939ba8;
+  --grey-500: #6f7887;
+  --grey-600: #545c6b;
+  --grey-700: #3d4453;
+  --grey-800: #272d3a;
+  --grey-850: #1c2230;
+  --grey-900: #141926;
+  --grey-950: #0d111b;
+
+  /* --- Primitives: accent ------------------------------------------------- */
+  --blue-50: #eef3ff;
+  --blue-100: #dbe6fe;
+  --blue-300: #93b0f8;
+  --blue-500: #3b6fe0;
+  --blue-600: #2f5bc4;
+  --blue-700: #26499d;
+
+  --green-50: #e8f7ef;
+  --green-100: #cdeddd;
+  --green-500: #1f9d63;
+  --green-600: #178350;
+  --green-700: #12683f;
+
+  --amber-50: #fdf5e5;
+  --amber-100: #f9e8c4;
+  --amber-500: #c1861a;
+  --amber-600: #a06f12;
+  --amber-700: #7e570d;
+
+  --red-50: #fdeeed;
+  --red-100: #f9d8d6;
+  --red-500: #c2544d;
+  --red-600: #a8433d;
+  --red-700: #8a342f;
+
+  --violet-50: #f2effc;
+  --violet-500: #7c5cd6;
+
+  /* --- Typography --------------------------------------------------------- */
+  --font-sans:
+    'Inter var', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Roboto Mono', Menlo, monospace;
+
+  /* A 1.16 modular scale — tight enough for dense tables, with enough
+     separation at the top for page titles to read as a different register. */
+  --text-2xs: 0.6875rem; /* 11px */
+  --text-xs: 0.75rem; /* 12px */
+  --text-sm: 0.8125rem; /* 13px */
+  --text-base: 0.875rem; /* 14px */
+  --text-md: 0.9375rem; /* 15px */
+  --text-lg: 1.0625rem; /* 17px */
+  --text-xl: 1.25rem; /* 20px */
+  --text-2xl: 1.5rem; /* 24px */
+  --text-3xl: 1.875rem; /* 30px */
+  --text-4xl: 2.25rem; /* 36px */
+
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+
+  --tracking-tight: -0.015em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+  --tracking-caps: 0.08em;
+
+  /* --- Spacing: 4px base -------------------------------------------------- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* --- Radii -------------------------------------------------------------- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 999px;
+
+  /* --- Motion ------------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 280ms;
+
+  /* --- Layout ------------------------------------------------------------- */
+  --sidebar-width: 244px;
+  --sidebar-width-collapsed: 64px;
+  --topbar-height: 60px;
+  --content-max: 1440px;
+
+  --z-dropdown: 40;
+  --z-sticky: 50;
+  --z-overlay: 100;
+  --z-modal: 110;
+  --z-toast: 120;
+}
+
+/* ==========================================================================
+   Semantic layer — light (default)
+   ========================================================================== */
+
+:root {
+  --surface-canvas: var(--grey-50);
+  --surface-raised: var(--grey-0);
+  --surface-sunken: var(--grey-100);
+  --surface-overlay: var(--grey-0);
+  --surface-hover: var(--grey-50);
+  --surface-active: var(--grey-100);
+  --surface-inverse: var(--grey-900);
+
+  --border-subtle: var(--grey-150);
+  --border-default: var(--grey-200);
+  --border-strong: var(--grey-300);
+  --border-focus: var(--blue-500);
+
+  --text-primary: var(--grey-900);
+  --text-secondary: var(--grey-600);
+  --text-tertiary: var(--grey-500);
+  --text-placeholder: var(--grey-400);
+  --text-inverse: var(--grey-0);
+  --text-link: var(--blue-600);
+
+  --accent-bg: var(--blue-50);
+  --accent-border: var(--blue-100);
+  --accent-solid: var(--blue-500);
+  --accent-solid-hover: var(--blue-600);
+  --accent-text: var(--blue-700);
+
+  --success-bg: var(--green-50);
+  --success-border: var(--green-100);
+  --success-solid: var(--green-500);
+  --success-text: var(--green-700);
+
+  --warning-bg: var(--amber-50);
+  --warning-border: var(--amber-100);
+  --warning-solid: var(--amber-500);
+  --warning-text: var(--amber-700);
+
+  --danger-bg: var(--red-50);
+  --danger-border: var(--red-100);
+  --danger-solid: var(--red-500);
+  --danger-solid-hover: var(--red-600);
+  --danger-text: var(--red-700);
+
+  --neutral-bg: var(--grey-100);
+  --neutral-border: var(--grey-200);
+  --neutral-solid: var(--grey-400);
+  --neutral-text: var(--grey-600);
+
+  --info-bg: var(--blue-50);
+  --info-border: var(--blue-100);
+  --info-solid: var(--blue-500);
+  --info-text: var(--blue-700);
+
+  /* Sidebar keeps its dark treatment in both themes: it anchors the layout and
+     gives the light content area an edge to sit against. */
+  --nav-bg: var(--grey-900);
+  --nav-bg-hover: rgb(255 255 255 / 7%);
+  --nav-bg-active: rgb(255 255 255 / 11%);
+  --nav-text: #9aa3b2;
+  --nav-text-hover: #dfe3ea;
+  --nav-text-active: var(--grey-0);
+  --nav-border: rgb(255 255 255 / 8%);
+
+  /* Layered rather than one blurry drop — closer to how real elevation reads. */
+  --shadow-xs: 0 1px 2px rgb(16 24 40 / 5%);
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 4%);
+  --shadow-md: 0 2px 4px rgb(16 24 40 / 6%), 0 4px 10px rgb(16 24 40 / 6%);
+  --shadow-lg: 0 4px 8px rgb(16 24 40 / 6%), 0 12px 28px rgb(16 24 40 / 10%);
+  --shadow-xl: 0 8px 16px rgb(16 24 40 / 8%), 0 24px 56px rgb(16 24 40 / 14%);
+
+
+  /* --- Chart palette -------------------------------------------------------
+     Project-status series, in the fixed order Discussion → In Progress →
+     On Hold → Completed. Assigned in that order and never cycled.
+
+     These are NOT the badge colours. Badge tones are tuned for small tinted
+     pills; as adjacent fills in a stacked bar the same hues failed validation —
+     green against red measured ΔE 3.6 for deuteranopia, and red against amber
+     14.0 even in full colour. These steps were re-picked and verified with the
+     dataviz validator (worst adjacent pair: deutan 10.3, normal 28.5). */
+  --chart-status-1: #3b6fe0; /* Discussion  */
+  --chart-status-2: #d99a1f; /* In Progress */
+  --chart-status-3: #b03060; /* On Hold     */
+  --chart-status-4: #0f9d8f; /* Completed   */
+
+  /* Magnitude ramps — one hue each, never a rainbow. */
+  --chart-design: #3b6fe0;
+  --chart-execution: #0f9d8f;
+
+  --focus-ring: 0 0 0 3px rgb(59 111 224 / 22%);
+  --focus-ring-danger: 0 0 0 3px rgb(194 84 77 / 22%);
+
+  color-scheme: light;
+}
+
+/* ==========================================================================
+   Semantic layer — dark
+   ========================================================================== */
+
+.theme-dark {
+  --surface-canvas: var(--grey-950);
+  --surface-raised: var(--grey-900);
+  --surface-sunken: #0a0e17;
+  --surface-overlay: var(--grey-850);
+  --surface-hover: rgb(255 255 255 / 4%);
+  --surface-active: rgb(255 255 255 / 7%);
+  --surface-inverse: var(--grey-100);
+
+  --border-subtle: rgb(255 255 255 / 8%);
+  --border-default: rgb(255 255 255 / 13%);
+  --border-strong: rgb(255 255 255 / 22%);
+  --border-focus: var(--blue-300);
+
+  --text-primary: #eceff4;
+  --text-secondary: #a3abb9;
+  --text-tertiary: #7d8593;
+  --text-placeholder: #626b78;
+  --text-inverse: var(--grey-900);
+  --text-link: var(--blue-300);
+
+  /* Tinted surfaces are mixed from the accent rather than using the light
+     ramp, which would glow against a dark canvas. */
+  --accent-bg: color-mix(in srgb, var(--blue-500) 16%, transparent);
+  --accent-border: color-mix(in srgb, var(--blue-500) 34%, transparent);
+  --accent-solid: #5b86e8;
+  --accent-solid-hover: #7098ec;
+  --accent-text: #a9c2f7;
+
+  --success-bg: color-mix(in srgb, var(--green-500) 16%, transparent);
+  --success-border: color-mix(in srgb, var(--green-500) 34%, transparent);
+  --success-solid: #34b478;
+  --success-text: #7fd9ac;
+
+  --warning-bg: color-mix(in srgb, var(--amber-500) 18%, transparent);
+  --warning-border: color-mix(in srgb, var(--amber-500) 36%, transparent);
+  --warning-solid: #dda43a;
+  --warning-text: #eec883;
+
+  --danger-bg: color-mix(in srgb, var(--red-500) 18%, transparent);
+  --danger-border: color-mix(in srgb, var(--red-500) 36%, transparent);
+  --danger-solid: #d8706a;
+  --danger-solid-hover: #e08882;
+  --danger-text: #f0aaa5;
+
+  --neutral-bg: rgb(255 255 255 / 7%);
+  --neutral-border: rgb(255 255 255 / 13%);
+  --neutral-solid: var(--grey-500);
+  --neutral-text: #a3abb9;
+
+  --info-bg: color-mix(in srgb, var(--blue-500) 16%, transparent);
+  --info-border: color-mix(in srgb, var(--blue-500) 34%, transparent);
+  --info-solid: #5b86e8;
+  --info-text: #a9c2f7;
+
+  --nav-bg: #0a0e17;
+  --nav-border: rgb(255 255 255 / 7%);
+
+  /* Shadows barely read on dark ground, so elevation leans on borders instead
+     and the shadows only deepen the separation. */
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 40%);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 45%);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 55%);
+  --shadow-xl: 0 24px 60px rgb(0 0 0 / 65%);
+
+
+  /* Chosen against the dark surface, not flipped from the light steps: a flip
+     lands outside the L 0.48–0.67 band and collapses the CVD separation. */
+  --chart-status-1: #5b86e8;
+  --chart-status-2: #b8842a;
+  --chart-status-3: #c04070;
+  --chart-status-4: #12a894;
+
+  --chart-design: #5b86e8;
+  --chart-execution: #12a894;
+
+  --focus-ring: 0 0 0 3px rgb(91 134 232 / 32%);
+  --focus-ring-danger: 0 0 0 3px rgb(216 112 106 / 32%);
+
+  color-scheme: dark;
+}
+
+/* Follow the operating system until the user picks a side explicitly. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.theme-light) {
+    color-scheme: dark;
+  }
+}
