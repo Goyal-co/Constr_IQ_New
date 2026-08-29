@@ -13,6 +13,9 @@ import {
   parseIsoDate,
   todayUtc,
   type BulkDesignDto,
+  type CommentKind,
+  type CreateCommentDto,
+  type CreateRevisionDto,
   type CreateWorkItemDto,
   type MaterialStatus,
   type UpdateWorkItemDto,
@@ -52,6 +55,141 @@ export class WorkItemsService {
     });
     if (!item) throw new NotFoundException('That work item does not exist on this project.');
     return item;
+  }
+
+  // -------------------------------------------------------------------------
+  // Comments
+  // -------------------------------------------------------------------------
+
+  /**
+   * Add a standalone comment.
+   *
+   * Comments attached to a change go through `update` instead, so the note and
+   * the transition it explains commit together. This route is for the ordinary
+   * case of somebody saying something about an activity.
+   */
+  async addComment(
+    actor: AuthenticatedUser,
+    projectId: string,
+    id: string,
+    dto: CreateCommentDto,
+  ): Promise<WorkItem> {
+    await this.projects.assertProject(actor.organisationId, projectId);
+    await this.load(projectId, id);
+
+    await this.prisma.activityComment.create({
+      data: { workItemId: id, authorId: actor.id, kind: 'NOTE', body: dto.body },
+    });
+
+    return this.present(actor, projectId, id);
+  }
+
+  // -------------------------------------------------------------------------
+  // Drawing revisions
+  // -------------------------------------------------------------------------
+
+  /**
+   * Issue the next revision of this activity's drawing.
+   *
+   * The number is assigned here, inside a transaction, rather than sent by the
+   * client: two people clicking "New revision" at the same moment must not both
+   * produce an R3. The unique constraint on (workItemId, revision) is the
+   * backstop if they do.
+   *
+   * Issuing a revision also marks the drawing as issued — a revision that
+   * existed while the item still read "not issued" would be a contradiction.
+   */
+  async addRevision(
+    actor: AuthenticatedUser,
+    projectId: string,
+    id: string,
+    dto: CreateRevisionDto,
+    client?: ClientMeta,
+  ): Promise<WorkItem> {
+    const project = await this.projects.assertProject(actor.organisationId, projectId);
+    const existing = await this.load(projectId, id);
+    const today = todayUtc();
+    const issuedDate = dto.issuedDate === undefined ? today : parseIsoDate(dto.issuedDate);
+
+    const next = await this.prisma.$transaction(async (tx) => {
+      const latest = await tx.drawingRevision.findFirst({
+        where: { workItemId: id },
+        orderBy: { revision: 'desc' },
+        select: { revision: true },
+      });
+      const revision = (latest?.revision ?? 0) + 1;
+
+      await tx.drawingRevision.create({
+        data: {
+          workItemId: id,
+          revision,
+          notes: dto.notes ?? null,
+          issuedDate,
+          issuedById: actor.id,
+        },
+      });
+
+      await tx.workItem.update({
+        where: { id },
+        data: {
+          currentRevision: revision,
+          designComplete: true,
+          designCompletedAt: new Date(),
+          designedById: actor.id,
+          designCompletedDate: issuedDate ?? today,
+        },
+      });
+
+      if (dto.notes) {
+        await tx.activityComment.create({
+          data: {
+            workItemId: id,
+            authorId: actor.id,
+            kind: 'REVISION',
+            body: `R${revision}: ${dto.notes}`,
+          },
+        });
+      }
+
+      return revision;
+    });
+
+    await this.audit.record({
+      organisationId: actor.organisationId,
+      actorId: actor.id,
+      action: 'workitem.revision.issued',
+      entityType: 'WorkItem',
+      entityId: id,
+      entityLabel: `${project.name} · ${existing.name}`,
+      before: { currentRevision: existing.currentRevision },
+      after: { currentRevision: next, notes: dto.notes ?? null },
+      client,
+    });
+
+    return this.present(actor, projectId, id);
+  }
+
+  /** Re-reads an item and maps it, so every mutation returns the same shape. */
+  private async present(
+    actor: AuthenticatedUser,
+    projectId: string,
+    id: string,
+  ): Promise<WorkItem> {
+    const [item, materials, settings] = await Promise.all([
+      this.prisma.workItem.findFirstOrThrow({
+        where: { id, projectId },
+        include: {
+          phase: true,
+          assignee: true,
+          designedBy: true,
+          comments: { include: { author: true }, orderBy: { createdAt: 'desc' } },
+          revisions: { include: { issuedBy: true }, orderBy: { revision: 'desc' } },
+        },
+      }),
+      this.materialsFor(projectId),
+      this.settings.get(actor.organisationId),
+    ]);
+    return toWorkItem(item as WorkItemWithRelations, materials, settings, new Map(), todayUtc());
   }
 
   /** All materials on the project — needed to resolve gating on any response. */
@@ -118,7 +256,8 @@ export class WorkItemsService {
     dto: UpdateWorkItemDto,
     client?: ClientMeta,
   ): Promise<WorkItem> {
-    const settings = await this.settings.get(actor.organisationId);
+    // Settings are not fetched here: the response is built by `present`, which
+    // reads them itself. Fetching them twice per update would be waste.
     const project = await this.projects.assertProject(actor.organisationId, projectId);
     const existing = await this.load(projectId, id);
 
@@ -261,6 +400,33 @@ export class WorkItemsService {
       include: { phase: true, assignee: true, designedBy: true },
     });
 
+    // A note supplied with the change is stored against the transition it
+    // explains, so "why did this slip" is answerable from the activity itself
+    // rather than by correlating the audit log against someone's memory.
+    if (dto.comment) {
+      const statusChanged =
+        dto.executionStatus !== undefined && dto.executionStatus !== existing.executionStatus;
+      const designChanged =
+        dto.designComplete !== undefined && dto.designComplete !== existing.designComplete;
+
+      const kind: CommentKind = statusChanged
+        ? 'STATUS_CHANGE'
+        : designChanged
+          ? 'DESIGN_APPROVAL'
+          : 'NOTE';
+
+      await this.prisma.activityComment.create({
+        data: {
+          workItemId: id,
+          authorId: actor.id,
+          kind,
+          body: dto.comment,
+          statusFrom: statusChanged ? existing.executionStatus : null,
+          statusTo: statusChanged ? (dto.executionStatus as string) : null,
+        },
+      });
+    }
+
     const before = computeSlippage(
       {
         designComplete: existing.designComplete,
@@ -334,7 +500,11 @@ export class WorkItemsService {
       });
     }
 
-    return toWorkItem(item as WorkItemWithRelations, materials, settings);
+    // Re-read rather than mapping `item`: that row was fetched before the
+    // comment was written, so returning it would drop a note the caller just
+    // made and the interface would show the change with no reason attached
+    // until the next refetch.
+    return this.present(actor, projectId, id);
   }
 
   private actionFor(dto: UpdateWorkItemDto, wasDesigned: boolean, wasStatus: string): string {

@@ -14,7 +14,6 @@ import {
   IconMoon,
   IconProcurement,
   IconProjects,
-  IconReport,
   IconSettings,
   IconSun,
   IconUsers,
@@ -35,7 +34,6 @@ const PRIMARY_NAV: NavEntry[] = [
   { to: '/', label: 'Dashboard', icon: <IconDashboard size={17} />, end: true },
   { to: '/projects', label: 'Projects', icon: <IconProjects size={17} /> },
   { to: '/procurement', label: 'Procurement', icon: <IconProcurement size={17} /> },
-  { to: '/reports', label: 'Reports', icon: <IconReport size={17} />, permission: 'report:read' },
 ];
 
 const ADMIN_NAV: NavEntry[] = [

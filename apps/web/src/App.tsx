@@ -12,9 +12,6 @@ import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
 
 // Split the heavier administrative screens out of the initial bundle — most
 // users never open them, and the report page pulls in chart and export code.
-const ReportsPage = lazy(() =>
-  import('@/pages/ReportsPage').then((m) => ({ default: m.ReportsPage })),
-);
 const ProcurementPage = lazy(() =>
   import('@/pages/ProcurementPage').then((m) => ({ default: m.ProcurementPage })),
 );
@@ -58,16 +55,6 @@ export function App() {
             <Lazy>
               <ProcurementPage />
             </Lazy>
-          }
-        />
-        <Route
-          path="reports"
-          element={
-            <Guard permission="report:read">
-              <Lazy>
-                <ReportsPage />
-              </Lazy>
-            </Guard>
           }
         />
         <Route

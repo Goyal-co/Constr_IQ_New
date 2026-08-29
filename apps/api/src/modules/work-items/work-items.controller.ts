@@ -2,10 +2,14 @@ import { Body, Controller, Delete, Param, ParseUUIDPipe, Patch, Post } from '@ne
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
   bulkDesignSchema,
+  createCommentSchema,
+  createRevisionSchema,
   createWorkItemSchema,
   reorderSchema,
   updateWorkItemSchema,
   type BulkDesignDto,
+  type CreateCommentDto,
+  type CreateRevisionDto,
   type CreateWorkItemDto,
   type ReorderDto,
   type UpdateWorkItemDto,
@@ -65,6 +69,33 @@ export class WorkItemsController {
     @Body(zodBody(reorderSchema)) dto: ReorderDto,
   ) {
     return this.workItems.reorder(actor, projectId, dto.ids);
+  }
+
+  @Post(':id/comments')
+  @RequirePermissions('activity:update')
+  @ApiOperation({ summary: 'Comment on an activity' })
+  addComment(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(zodBody(createCommentSchema)) dto: CreateCommentDto,
+  ) {
+    return this.workItems.addComment(actor, projectId, id, dto);
+  }
+
+  @Post(':id/revisions')
+  @RequirePermissions('drawing:update')
+  @ApiOperation({
+    summary: 'Issue the next drawing revision — the number is assigned server-side',
+  })
+  addRevision(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(zodBody(createRevisionSchema)) dto: CreateRevisionDto,
+    @ClientInfo() client: ClientMeta,
+  ) {
+    return this.workItems.addRevision(actor, projectId, id, dto, client);
   }
 
   @Patch(':id')

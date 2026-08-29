@@ -140,12 +140,12 @@ export function ProjectCard({
         <div className="stack gap-2" style={{ marginTop: 'var(--space-4)' }}>
           <div>
             <div className="row-between text-2xs text-tertiary" style={{ marginBottom: 4 }}>
-              <span>Design</span>
+              <span>Drawings</span>
               <span>
                 {m.designComplete}/{m.designTotal}
               </span>
             </div>
-            <Progress value={m.designPct} size="sm" label="Design progress" />
+            <Progress value={m.designPct} size="sm" label="Drawing progress" />
           </div>
           <div>
             <div className="row-between text-2xs text-tertiary" style={{ marginBottom: 4 }}>
@@ -276,8 +276,8 @@ export function ProjectRow({ project }: { project: ProjectSummary }) {
       <td data-label="Handover" className="text-xs">
         {formatIso(project.handoverDate)}
       </td>
-      <td data-label="Design" style={{ width: 140 }}>
-        <Progress value={m.designPct} size="sm" label="Design" />
+      <td data-label="Drawings" style={{ width: 140 }}>
+        <Progress value={m.designPct} size="sm" label="Drawings" />
       </td>
       <td data-label="Execution" style={{ width: 140 }}>
         <Progress value={m.executionPct} size="sm" colour="var(--accent-solid)" label="Execution" />

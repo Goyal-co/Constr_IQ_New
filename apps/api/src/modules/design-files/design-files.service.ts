@@ -2,7 +2,9 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   parseIsoDate,
   todayUtc,
+  type CreateCommentDto,
   type CreateDesignFileDto,
+  type CreateRevisionDto,
   type DesignFile,
   type UpdateDesignFileDto,
 } from '@ciq/shared';
@@ -13,11 +15,15 @@ import { ProjectsService } from '../projects/projects.service';
 import { toDesignFile, type DesignFileWithRelations } from '../projects/project.mapper';
 
 /**
- * Design → Design Files.
+ * Drawing → Design.
  *
  * Drawings and documents. Deliberately not phase-scoped and with no execution
  * track: a GFC set is issued, never built, so giving it a status of "in progress
  * on site" would be meaningless.
+ *
+ * It carries comments and revisions on the same terms as a work item, because a
+ * drawing set is reissued more often than anything else on a project and "which
+ * revision is site building from" is the question this section exists to answer.
  */
 @Injectable()
 export class DesignFilesService {
@@ -26,6 +32,125 @@ export class DesignFilesService {
     private readonly audit: AuditService,
     private readonly projects: ProjectsService,
   ) {}
+
+  /** Re-reads with the full relations, so every mutation returns one shape. */
+  private async present(projectId: string, id: string): Promise<DesignFile> {
+    const file = await this.prisma.designFile.findFirstOrThrow({
+      where: { id, projectId },
+      include: {
+        completedBy: true,
+        comments: { include: { author: true }, orderBy: { createdAt: 'desc' } },
+        revisions: { include: { issuedBy: true }, orderBy: { revision: 'desc' } },
+      },
+    });
+    return toDesignFile(file as DesignFileWithRelations);
+  }
+
+  private async assertFile(projectId: string, id: string) {
+    const file = await this.prisma.designFile.findFirst({ where: { id, projectId } });
+    if (!file) throw new NotFoundException('That drawing does not exist on this project.');
+    return file;
+  }
+
+  // -------------------------------------------------------------------------
+  // Comments and revisions
+  // -------------------------------------------------------------------------
+
+  async addComment(
+    actor: AuthenticatedUser,
+    projectId: string,
+    id: string,
+    dto: CreateCommentDto,
+  ): Promise<DesignFile> {
+    await this.projects.assertProject(actor.organisationId, projectId);
+    await this.assertFile(projectId, id);
+
+    await this.prisma.activityComment.create({
+      data: { designFileId: id, authorId: actor.id, kind: 'NOTE', body: dto.body },
+    });
+
+    return this.present(projectId, id);
+  }
+
+  /**
+   * Issue the next revision of this drawing.
+   *
+   * The number is assigned inside a transaction rather than sent by the client,
+   * so two people clicking at once cannot both produce an R3 — the unique index
+   * on (designFileId, revision) is the backstop if they somehow do.
+   *
+   * Issuing also marks the drawing issued: a revision existing while the file
+   * still read "not issued" would contradict itself.
+   */
+  async addRevision(
+    actor: AuthenticatedUser,
+    projectId: string,
+    id: string,
+    dto: CreateRevisionDto,
+    client?: ClientMeta,
+  ): Promise<DesignFile> {
+    const project = await this.projects.assertProject(actor.organisationId, projectId);
+    const existing = await this.assertFile(projectId, id);
+    const today = todayUtc();
+    const issuedDate = dto.issuedDate === undefined ? today : parseIsoDate(dto.issuedDate);
+
+    const next = await this.prisma.$transaction(async (tx) => {
+      const latest = await tx.drawingRevision.findFirst({
+        where: { designFileId: id },
+        orderBy: { revision: 'desc' },
+        select: { revision: true },
+      });
+      const revision = (latest?.revision ?? 0) + 1;
+
+      await tx.drawingRevision.create({
+        data: {
+          designFileId: id,
+          revision,
+          notes: dto.notes ?? null,
+          issuedDate,
+          issuedById: actor.id,
+        },
+      });
+
+      await tx.designFile.update({
+        where: { id },
+        data: {
+          currentRevision: revision,
+          isComplete: true,
+          completedAt: new Date(),
+          completedById: actor.id,
+          completedDate: issuedDate ?? today,
+        },
+      });
+
+      if (dto.notes) {
+        await tx.activityComment.create({
+          data: {
+            designFileId: id,
+            authorId: actor.id,
+            kind: 'REVISION',
+            body: `R${revision}: ${dto.notes}`,
+          },
+        });
+      }
+
+      return revision;
+    });
+
+    await this.audit.record({
+      organisationId: actor.organisationId,
+      actorId: actor.id,
+      action: 'design_file.revision_issued',
+      entityType: 'DesignFile',
+      entityId: id,
+      entityLabel: `${project.name} · ${existing.name}`,
+      before: { currentRevision: existing.currentRevision },
+      after: { currentRevision: next, notes: dto.notes ?? null },
+      client,
+    });
+
+    return this.present(projectId, id);
+  }
 
   async create(
     actor: AuthenticatedUser,
@@ -137,7 +262,27 @@ export class DesignFilesService {
       client,
     });
 
-    return toDesignFile(file as DesignFileWithRelations);
+    // A note supplied with the change is stored against the approval it
+    // explains, so "why was this signed off" is answerable from the drawing
+    // itself rather than from somebody's memory.
+    if (dto.comment) {
+      await this.prisma.activityComment.create({
+        data: {
+          designFileId: id,
+          authorId: actor.id,
+          kind:
+            dto.isComplete !== undefined && dto.isComplete !== existing.isComplete
+              ? 'DESIGN_APPROVAL'
+              : 'NOTE',
+          body: dto.comment,
+        },
+      });
+    }
+
+    // Re-read rather than mapping `file`: that row was fetched before the
+    // comment was written, so returning it would drop a note the caller just
+    // made until the next refetch.
+    return this.present(projectId, id);
   }
 
   /** Tick or untick every design file at once. */

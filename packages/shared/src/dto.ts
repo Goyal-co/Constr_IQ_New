@@ -277,6 +277,15 @@ export const updateDesignFileSchema = z.object({
    * a document issued last week can be backdated rather than recorded as today.
    */
   completedDate: nullableIsoDate,
+
+  /**
+   * An optional note recorded alongside this change.
+   *
+   * Carried on the update rather than posted separately so the note and the
+   * approval it explains land together — two requests could leave an issued
+   * drawing with no reason attached if the second one failed.
+   */
+  comment: z.string().trim().min(1).max(2000).optional(),
 });
 export type UpdateDesignFileDto = z.infer<typeof updateDesignFileSchema>;
 
@@ -315,6 +324,15 @@ export const updateWorkItemSchema = z
     actualStart: nullableIsoDate,
     actualEnd: nullableIsoDate,
     assigneeId: optionalId,
+
+    /**
+     * An optional note recorded alongside this change.
+     *
+     * Carried on the update rather than posted separately so the comment and
+     * the transition it explains land in one transaction — two requests could
+     * leave a status change with no reason attached if the second one failed.
+     */
+    comment: z.string().trim().min(1).max(2000).optional(),
   })
   .refine((v) => !v.plannedStart || !v.plannedEnd || v.plannedStart <= v.plannedEnd, {
     message: 'Planned start must fall on or before planned end',
@@ -325,6 +343,24 @@ export const updateWorkItemSchema = z
     path: ['actualEnd'],
   });
 export type UpdateWorkItemDto = z.infer<typeof updateWorkItemSchema>;
+
+/** A standalone comment on an activity. */
+export const createCommentSchema = z.object({
+  body: z.string().trim().min(1, 'Write something first').max(2000),
+});
+export type CreateCommentDto = z.infer<typeof createCommentSchema>;
+
+/**
+ * Issue a new drawing revision.
+ *
+ * The revision number is assigned by the server, not sent by the client: two
+ * people clicking "New revision" at once must not both produce an R3.
+ */
+export const createRevisionSchema = z.object({
+  notes: z.string().trim().max(2000).optional(),
+  issuedDate: nullableIsoDate,
+});
+export type CreateRevisionDto = z.infer<typeof createRevisionSchema>;
 
 /** Tick or untick the design track for a whole phase at once. */
 export const bulkDesignSchema = z.object({
@@ -380,6 +416,13 @@ export type ReportDto = z.infer<typeof reportSchema>;
 export const reportQuerySchema = z.object({
   categoryId: id.optional(),
   managerId: id.optional(),
+  /**
+   * Narrow the whole report to one project.
+   *
+   * The portfolio figures then describe that project alone, which is what
+   * somebody tracking a single fit-out wants — the same charts, scoped.
+   */
+  projectId: id.optional(),
   scope: z.enum(['all', 'active', 'completed']).default('all'),
 });
 export type ReportQueryDto = z.infer<typeof reportQuerySchema>;

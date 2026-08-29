@@ -56,6 +56,22 @@ enum ActivityStatus {
   BLOCKED
 }
 
+/// What a comment was attached to.
+///
+/// Kept as an enum rather than inferred from the presence of `statusTo`,
+/// because "why is this blocked" and "why did I approve this" are different
+/// questions and the reader filters on the difference.
+enum CommentKind {
+  /// A free note, not tied to any change.
+  NOTE
+  /// Accompanied a design/drawing sign-off.
+  DESIGN_APPROVAL
+  /// Accompanied an execution status change.
+  STATUS_CHANGE
+  /// Accompanied a new drawing revision.
+  REVISION
+}
+
 enum MaterialStatus {
   PENDING
   ORDERED
@@ -142,18 +158,20 @@ model User {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  organisation       Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisation       Organisation      @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   refreshTokens      RefreshToken[]
-  managedProjects    Project[]       @relation("ProjectManager")
+  managedProjects    Project[]         @relation("ProjectManager")
   projectMemberships ProjectMember[]
-  completedFiles     DesignFile[]    @relation("DesignFileCompletedBy")
-  designedItems      WorkItem[]      @relation("WorkItemDesignedBy")
-  assignedWorkItems  WorkItem[]      @relation("WorkItemAssignee")
+  completedFiles     DesignFile[]      @relation("DesignFileCompletedBy")
+  designedItems      WorkItem[]        @relation("WorkItemDesignedBy")
+  assignedWorkItems  WorkItem[]        @relation("WorkItemAssignee")
   uploads            Attachment[]
+  activityComments   ActivityComment[] @relation("CommentAuthor")
+  drawingRevisions   DrawingRevision[] @relation("RevisionIssuedBy")
   auditLogs          AuditLog[]
   notifications      Notification[]
-  sentInvitations    Invitation[]    @relation("InvitedBy")
-  reportEdits        ReportSetting[] @relation("ReportUpdatedBy")
+  sentInvitations    Invitation[]      @relation("InvitedBy")
+  reportEdits        ReportSetting[]   @relation("ReportUpdatedBy")
 
   // Email is unique per tenant, not globally — the same person may belong to two
   // organisations with separate credentials.
@@ -373,6 +391,13 @@ model DesignFile {
   project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   completedBy User?   @relation("DesignFileCompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
 
+  /// The revision currently in force, or 0 when nothing has been issued.
+  /// Denormalised from `revisions` so a list does not need one query per row.
+  currentRevision Int @default(0)
+
+  comments  ActivityComment[]
+  revisions DrawingRevision[]
+
   @@index([projectId, position])
   @@map("design_files")
 }
@@ -415,12 +440,18 @@ model WorkItem {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  phase      Phase      @relation(fields: [phaseId], references: [id], onDelete: Restrict)
-  designedBy User?      @relation("WorkItemDesignedBy", fields: [designedById], references: [id], onDelete: SetNull)
-  assignee   User?      @relation("WorkItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phase      Phase             @relation(fields: [phaseId], references: [id], onDelete: Restrict)
+  designedBy User?             @relation("WorkItemDesignedBy", fields: [designedById], references: [id], onDelete: SetNull)
+  assignee   User?             @relation("WorkItemAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   /// Materials gating this item. While any is undelivered it cannot be Done.
   materials  Material[]
+  comments   ActivityComment[]
+  revisions  DrawingRevision[]
+
+  /// The drawing revision currently in force. Denormalised from `revisions` so
+  /// a project listing does not need a correlated subquery per row to show it.
+  currentRevision Int @default(0)
 
   @@index([projectId, phaseId, position])
   @@index([projectId, executionStatus])
@@ -473,6 +504,91 @@ model Material {
 // ---------------------------------------------------------------------------
 // Attachments
 // ---------------------------------------------------------------------------
+
+/// A comment on an activity.
+///
+/// The point is the ones attached to a change: marking an item designed or
+/// done records *why* alongside *when*, so a slipped programme can be read
+/// back months later without asking whoever clicked the button.
+///
+/// Distinct from AuditLog, which records every mutation automatically and is
+/// not editable. This is deliberate human commentary, written at the moment of
+/// the decision and shown next to the work rather than in an admin screen.
+model ActivityComment {
+  id       String      @id @default(uuid()) @db.Uuid
+  authorId String?     @db.Uuid
+  kind     CommentKind @default(NOTE)
+  body     String
+
+  /// Exactly one of these is set. A comment belongs to a work item or to a
+  /// design file, never both and never neither — enforced by a CHECK constraint
+  /// in the migration, because Prisma cannot express it.
+  ///
+  /// Two nullable columns rather than two tables: the thread reads and renders
+  /// identically either way, and splitting it would duplicate every query and
+  /// every component for no gain.
+  workItemId   String? @db.Uuid
+  designFileId String? @db.Uuid
+
+  /// The transition this comment accompanied, when it accompanied one. Stored
+  /// as plain strings rather than the ActivityStatus enum: a comment is a
+  /// historical record, and it must not become unreadable if the status
+  /// vocabulary is ever changed.
+  statusFrom String? @db.VarChar(40)
+  statusTo   String? @db.VarChar(40)
+
+  createdAt DateTime @default(now())
+
+  workItem   WorkItem?   @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  designFile DesignFile? @relation(fields: [designFileId], references: [id], onDelete: Cascade)
+  /// Kept when the author's account is removed - the comment is project record,
+  /// and losing its text because somebody left would be worse than an orphan.
+  author     User?       @relation("CommentAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([workItemId, createdAt])
+  @@index([designFileId, createdAt])
+  @@index([authorId])
+  @@map("activity_comments")
+}
+
+/// One issued version of an activity's drawing.
+///
+/// Construction drawings are reissued, and "which revision is site building
+/// from" is a question the tracker has to answer. Each row is an issue event;
+/// the highest `revision` for a work item is the one in force, mirrored onto
+/// `WorkItem.currentRevision`.
+///
+/// Numbering starts at 1 and is unique per item, so R1/R2/R3 read the same way
+/// everywhere and a duplicate cannot be created by two people clicking at once.
+model DrawingRevision {
+  id       String @id @default(uuid()) @db.Uuid
+  revision Int
+
+  /// Exactly one of these is set — see the note on ActivityComment.
+  workItemId   String? @db.Uuid
+  designFileId String? @db.Uuid
+
+  /// Why it was reissued. The whole reason to keep the history.
+  notes      String?
+  /// When this revision was issued. A calendar date, like every other date here.
+  issuedDate DateTime? @db.Date
+  issuedById String?   @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  workItem   WorkItem?   @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  designFile DesignFile? @relation(fields: [designFileId], references: [id], onDelete: Cascade)
+  issuedBy   User?       @relation("RevisionIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
+
+  /// Numbering is unique per owner, so R1/R2/R3 mean the same thing on a design
+  /// file as on a work item and two people cannot both create an R3.
+  @@unique([workItemId, revision])
+  @@unique([designFileId, revision])
+  @@index([workItemId, revision])
+  @@index([designFileId, revision])
+  @@index([issuedById])
+  @@map("drawing_revisions")
+}
 
 model Attachment {
   id             String           @id @default(uuid()) @db.Uuid

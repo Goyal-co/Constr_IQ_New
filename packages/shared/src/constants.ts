@@ -135,18 +135,61 @@ export const PROCUREMENT_STATE_TONE: Record<ProcurementState, Tone> = {
 export const PROJECT_SECTIONS = ['DESIGN', 'MATERIALS', 'EXECUTION'] as const;
 export type ProjectSection = (typeof PROJECT_SECTIONS)[number];
 
+/**
+ * The enum key stays `DESIGN` while the label reads "Drawing".
+ *
+ * Renaming the key would mean a migration, a change to every stored URL that
+ * carries `?section=`, and a rewrite of the audit history — all to alter a word
+ * on screen. The label is the only thing anybody sees, so the label is the only
+ * thing that changes.
+ */
 export const PROJECT_SECTION_LABELS: Record<ProjectSection, string> = {
-  DESIGN: 'Design',
+  DESIGN: 'Drawing',
   MATERIALS: 'Materials',
   EXECUTION: 'Execution',
 };
 
 /**
- * Design has one fixed sub-section — the drawing documents — followed by one
- * sub-section per work phase. Execution has the same work-phase sub-sections and
- * no fixed one, because there is nothing to build for a document.
+ * Drawing opens with the document list, then runs one block per work phase.
+ * Execution has the same work-phase blocks and no document list, because there
+ * is nothing to build for a document.
  */
-export const DESIGN_FILES_LABEL = 'Design Files';
+export const DESIGN_FILES_LABEL = 'Design';
+
+/**
+ * Comment vocabulary.
+ *
+ * A comment is either a free note or one attached to a change. The attached
+ * ones are the point: they record why an item was approved or moved, next to
+ * the work rather than in an audit screen.
+ */
+export const COMMENT_KINDS = ['NOTE', 'DESIGN_APPROVAL', 'STATUS_CHANGE', 'REVISION'] as const;
+export type CommentKind = (typeof COMMENT_KINDS)[number];
+
+export const COMMENT_KIND_LABELS: Record<CommentKind, string> = {
+  NOTE: 'Note',
+  DESIGN_APPROVAL: 'Drawing approval',
+  STATUS_CHANGE: 'Status change',
+  REVISION: 'Revision',
+};
+
+export const COMMENT_KIND_TONE: Record<CommentKind, Tone> = {
+  NOTE: 'neutral',
+  DESIGN_APPROVAL: 'info',
+  STATUS_CHANGE: 'success',
+  REVISION: 'warning',
+};
+
+/**
+ * How a revision number is displayed.
+ *
+ * Revisions are 1-based in the database and shown as R1, R2, R3. Zero means no
+ * drawing has been issued yet, which is a different statement from R0 — some
+ * practices use R0 for the first issue — so it renders as a dash instead.
+ */
+export function formatRevision(revision: number): string {
+  return revision > 0 ? `R${revision}` : '—';
+}
 
 // ---------------------------------------------------------------------------
 // Work items — the rows shared by Design and Execution

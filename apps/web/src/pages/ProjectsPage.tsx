@@ -152,7 +152,7 @@ export function ProjectsPage() {
             <option value="position">Manual order</option>
             <option value="name">Name</option>
             <option value="handover">Handover date</option>
-            <option value="progress">Design progress</option>
+            <option value="progress">Drawing progress</option>
             <option value="execution">Execution progress</option>
             <option value="risk">Risk</option>
             <option value="updated">Recently updated</option>

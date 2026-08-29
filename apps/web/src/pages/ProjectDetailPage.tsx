@@ -3,9 +3,12 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   ACTIVITY_STATUS_LABELS,
   ACTIVITY_STATUSES,
+  type ActivityStatus,
   DESIGN_FILES_LABEL,
+  formatRevision,
   MATERIAL_STATUS_LABELS,
   MATERIAL_STATUSES,
+  type DesignFile,
   type Material,
   type Phase,
   type ProjectDetail,
@@ -43,6 +46,7 @@ import {
   Kpi,
   Menu,
   MenuItem,
+  Modal,
   Progress,
   SkeletonRows,
   useToast,
@@ -56,6 +60,7 @@ import {
   IconEdit,
   IconGantt,
   IconLayers,
+  IconMessage,
   IconMore,
   IconPlus,
   IconProcurement,
@@ -69,24 +74,27 @@ import {
   ProjectStatusBadge,
   SlippageChip,
 } from '@/components/domain';
+import { ActivityDrawer, CommentPrompt } from '@/components/domain/ActivityDrawer';
 import { ProgrammeChart } from '@/components/domain/ProgrammeChart';
 import { ProjectFormModal } from '@/components/domain/ProjectFormModal';
 
 /**
  * A project has three sections.
  *
- *   Design      → Design Files, then one sub-section per work phase
+ *   Drawing     → Drawing Files, then one block per work phase
  *   Materials   → the buying list, each item tagged and optionally gating an item
- *   Execution   → the same work phases, showing the same rows as Design
+ *   Execution   → the same work phases, showing the same rows as Drawing
  *
- * Design → Civil and Execution → Civil render the identical work items. There is
+ * Drawing → Civil and Execution → Civil render the identical work items. There is
  * no synchronisation step because there is nothing to synchronise: one row, two
  * views of it.
  */
 type SectionId = 'design' | 'materials' | 'execution';
 
 const SECTIONS: { id: SectionId; label: string; icon: React.ReactNode }[] = [
-  { id: 'design', label: 'Design', icon: <IconDrawing size={15} /> },
+  // The id stays `design` — it is in every saved `?section=` link and in the
+  // audit history. Only the label changed.
+  { id: 'design', label: 'Drawing', icon: <IconDrawing size={15} /> },
   { id: 'materials', label: 'Materials', icon: <IconProcurement size={15} /> },
   { id: 'execution', label: 'Execution', icon: <IconGantt size={15} /> },
 ];
@@ -129,6 +137,10 @@ export function ProjectDetailPage() {
   }
 
   const m = project.metrics;
+  const hasDatedWork = project.workItems.some(
+    (w) => w.plannedStart || w.plannedEnd || w.actualStart || w.actualEnd,
+  );
+
   const setSection = (id: SectionId) => {
     const next = new URLSearchParams(params);
     if (id === 'design') next.delete('section');
@@ -229,7 +241,7 @@ export function ProjectDetailPage() {
           message={
             <>
               <strong>{project.name}</strong> will be removed along with everything inside it:{' '}
-              {project.designFiles.length} design file
+              {project.designFiles.length} drawing file
               {project.designFiles.length === 1 ? '' : 's'}, {project.workItems.length} work item
               {project.workItems.length === 1 ? '' : 's'} and {project.materials.length} material
               {project.materials.length === 1 ? '' : 's'}. Portfolio figures and reports will stop
@@ -277,7 +289,7 @@ export function ProjectDetailPage() {
       <div className="grid grid-auto-sm" style={{ marginBottom: 'var(--space-5)' }}>
         <Kpi
           value={`${m.designPct}%`}
-          label="Design"
+          label="Drawings"
           hint={`${m.designComplete} of ${m.designTotal} issued`}
           tone={m.designPct === 100 ? 'success' : undefined}
         />
@@ -300,7 +312,40 @@ export function ProjectDetailPage() {
         />
       </div>
 
-      <nav className="tabs" style={{ marginBottom: 'var(--space-5)' }}>
+      {/* The programme sits above the tabs, not inside Execution.
+          It describes the whole project, and burying it in one section meant
+          the schedule was invisible while reading drawings or materials —
+          which is exactly when somebody asks whether the dates still hold. */}
+      {/* Always rendered, never hidden.
+          It used to disappear when nothing had a date, which is exactly when a
+          reader most needs telling why — an absent chart reads as a broken one.
+          Empty, it says what to fill in instead. */}
+      <Card
+        title="Timeline"
+        icon={<IconGantt size={16} />}
+        description="Built from each work item's own planned and actual dates. Hatched bars are late or blocked on materials."
+        className="no-print"
+      >
+        {hasDatedWork ? (
+          <ProgrammeChart
+            workItems={project.workItems}
+            handoverDate={project.handoverDate}
+            locale={settings.locale}
+          />
+        ) : (
+          <EmptyState
+            icon={<IconGantt size={20} />}
+            title="No dates set yet"
+            message={
+              project.workItems.length === 0
+                ? 'Add work items under Drawing or Execution, then give them planned start and end dates. The timeline draws itself from those.'
+                : `${project.workItems.length} work item${project.workItems.length === 1 ? ' has' : 's have'} no planned dates. Set a planned start and end under Execution and they appear here.`
+            }
+          />
+        )}
+      </Card>
+
+      <nav className="tabs" style={{ marginBottom: 'var(--space-5)', marginTop: 'var(--space-5)' }}>
         {SECTIONS.map((entry) => (
           <button
             key={entry.id}
@@ -322,45 +367,12 @@ export function ProjectDetailPage() {
         ))}
       </nav>
 
-      {section === 'design' && <DesignSection project={project} />}
+      {section === 'design' && <DrawingSection project={project} />}
       {section === 'materials' && <MaterialsSection project={project} />}
       {section === 'execution' && <ExecutionSection project={project} />}
 
       {editing && <ProjectFormModal project={project} onClose={() => setEditing(false)} />}
     </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Sub-section navigation, shared by Design and Execution
-// ---------------------------------------------------------------------------
-
-function SubNav({
-  options,
-  active,
-  onSelect,
-}: {
-  options: { id: string; label: string; count: number; colour?: string }[];
-  active: string;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div className="subnav" role="tablist">
-      {options.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          role="tab"
-          className="subnav-item"
-          aria-selected={active === option.id}
-          onClick={() => onSelect(option.id)}
-        >
-          {option.colour && <span className="phase-swatch" style={{ background: option.colour }} />}
-          {option.label}
-          <span className="subnav-count">{option.count}</span>
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -389,45 +401,60 @@ function useProjectPhases(project: ProjectDetail): Phase[] {
   }, [orgPhases, project.workItems, project.materials]);
 }
 
-function useSubSection(fallback: string) {
-  const [params, setParams] = useSearchParams();
-  const active = params.get('sub') ?? fallback;
-  const select = (id: string) => {
-    const next = new URLSearchParams(params);
-    next.set('sub', id);
-    setParams(next, { replace: true });
-  };
-  return [active, select] as const;
-}
-
 // ---------------------------------------------------------------------------
-// Section 1 — Design
+// Section 1 — Drawing
 // ---------------------------------------------------------------------------
 
-function DesignSection({ project }: { project: ProjectDetail }) {
+/**
+ * Everything on one scrolling page rather than a tab per phase.
+ *
+ * The sub-sections were tabs, which meant Civil and Finishing could not be read
+ * together — and they are read together constantly, because a drawing package
+ * is reviewed as a whole. Tabs also hid how much was outstanding in the phase
+ * you were not looking at. Stacked, the whole drawing position is one scroll.
+ *
+ * The jump links stay: they scroll rather than switch, so they are a table of
+ * contents rather than a filter.
+ */
+function DrawingSection({ project }: { project: ProjectDetail }) {
   const phases = useProjectPhases(project);
-  const [sub, setSub] = useSubSection('files');
 
-  const options = [
-    { id: 'files', label: DESIGN_FILES_LABEL, count: project.designFiles.length },
-    ...phases.map((phase) => ({
-      id: phase.id,
-      label: phase.name,
-      count: project.workItems.filter((w) => w.phase.id === phase.id).length,
-      colour: phase.colour,
-    })),
-  ];
+  const jump = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   return (
     <div className="stack gap-5">
-      <SubNav options={options} active={sub} onSelect={setSub} />
+      {phases.length > 0 && (
+        <nav className="jump-nav no-print" aria-label="Jump to a drawing block">
+          <button type="button" onClick={() => jump('drawing-files')}>
+            {DESIGN_FILES_LABEL}
+            <span className="jump-count">{project.designFiles.length}</span>
+          </button>
+          {phases.map((phase) => (
+            <button key={phase.id} type="button" onClick={() => jump(`drawing-${phase.id}`)}>
+              <span className="phase-swatch" style={{ background: phase.colour }} />
+              {phase.name}
+              <span className="jump-count">
+                {project.workItems.filter((w) => w.phase.id === phase.id).length}
+              </span>
+            </button>
+          ))}
+        </nav>
+      )}
 
-      {sub === 'files' ? (
+      <div id="drawing-files" className="scroll-anchor">
         <DesignFilesPanel project={project} />
-      ) : phases.length === 0 ? (
+      </div>
+
+      {phases.length === 0 ? (
         <NoPhasesYet />
       ) : (
-        <DesignPhasePanel project={project} phase={phases.find((p) => p.id === sub) ?? phases[0]} />
+        phases.map((phase) => (
+          <div key={phase.id} id={`drawing-${phase.id}`} className="scroll-anchor">
+            <DesignPhasePanel project={project} phase={phase} />
+          </div>
+        ))
       )}
     </div>
   );
@@ -441,6 +468,11 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
   const remove = useDeleteDesignFile(project.id);
   const bulk = useBulkDesignFiles(project.id);
   const [draft, setDraft] = useState('');
+
+  /** The drawing whose comments and revisions are open, if any. */
+  const [openFile, setOpenFile] = useState<string | null>(null);
+  /** The drawing being marked issued, held while its note is written. */
+  const [approving, setApproving] = useState<DesignFile | null>(null);
 
   const done = project.designFiles.filter((f) => f.isComplete).length;
   const overdue = project.designFiles.filter((f) => f.isOverdue).length;
@@ -491,7 +523,7 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
           <div style={{ marginBottom: 'var(--space-4)' }}>
             <Progress
               value={Math.round((done / project.designFiles.length) * 100)}
-              label="Design files issued"
+              label="Drawing files issued"
             />
           </div>
 
@@ -501,10 +533,11 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
                 <tr>
                   <th style={{ width: 36 }} />
                   <th>Document</th>
+                  <th>Rev</th>
                   <th>Expected</th>
                   <th>Issued</th>
                   <th>Issued by</th>
-                  <th style={{ width: 40 }} />
+                  <th style={{ width: 96 }} />
                 </tr>
               </thead>
               <tbody>
@@ -515,7 +548,13 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
                         checked={file.isComplete}
                         disabled={!canEdit}
                         label={`Mark ${file.name} issued`}
-                        onChange={(next) => update.mutate({ id: file.id, isComplete: next })}
+                        onChange={(next) => {
+                          // Issuing prompts for a note; un-issuing does not —
+                          // reversing a tick is usually a correction, and asking
+                          // every time trains people to dismiss the dialog.
+                          if (next) setApproving(file);
+                          else update.mutate({ id: file.id, isComplete: false });
+                        }}
                       />
                     </td>
                     <td data-label="Document">
@@ -526,6 +565,11 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
                         }}
                       >
                         {file.name}
+                      </span>
+                    </td>
+                    <td data-label="Rev">
+                      <span className="rev-chip" data-issued={file.currentRevision > 0}>
+                        {formatRevision(file.currentRevision)}
                       </span>
                     </td>
                     <td data-label="Expected">
@@ -604,20 +648,35 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
                       {file.completedBy?.name ?? '—'}
                     </td>
                     <td>
-                      {can('drawing:delete') && (
-                        <DeleteButton
-                          label={file.name}
-                          title="Delete design file"
-                          message={
-                            <>
-                              <strong>{file.name}</strong> will be removed from this project&rsquo;s
-                              design list, and the design percentage will be recalculated without
-                              it.
-                            </>
-                          }
-                          onDelete={() => remove.mutate(file.id)}
-                        />
-                      )}
+                      <span className="row gap-1">
+                        <button
+                          type="button"
+                          className="row-action"
+                          aria-label={`Comments and revisions for ${file.name}`}
+                          title="Comments and revisions"
+                          onClick={() => setOpenFile(file.id)}
+                        >
+                          <IconMessage size={13} />
+                          {file.comments.length > 0 && (
+                            <span className="row-action-count">{file.comments.length}</span>
+                          )}
+                        </button>
+
+                        {can('drawing:delete') && (
+                          <DeleteButton
+                            label={file.name}
+                            title="Delete drawing"
+                            message={
+                              <>
+                                <strong>{file.name}</strong> will be removed from this
+                                project&rsquo;s design list, along with its comments and revision
+                                history. The drawing percentage is recalculated without it.
+                              </>
+                            }
+                            onDelete={() => remove.mutate(file.id)}
+                          />
+                        )}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -625,6 +684,46 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
             </table>
           </div>
         </>
+      )}
+
+      {openFile && (
+        <ActivityDrawer
+          projectId={project.id}
+          subject={{
+            kind: 'designFile',
+            // Read back from the project rather than held in state, so a new
+            // comment appears the moment the query invalidates.
+            file: project.designFiles.find((f) => f.id === openFile) ?? project.designFiles[0],
+          }}
+          onClose={() => setOpenFile(null)}
+        />
+      )}
+
+      {approving && (
+        <CommentPrompt
+          title="Mark drawing issued"
+          confirmLabel="Mark issued"
+          loading={update.isPending}
+          message={
+            <>
+              <strong>{approving.name}</strong> will be recorded as issued.
+            </>
+          }
+          onCancel={() => setApproving(null)}
+          onConfirm={(comment) => {
+            update.mutate(
+              { id: approving.id, isComplete: true, comment },
+              {
+                onError: (error) =>
+                  toast.error(
+                    'Could not mark that issued',
+                    error instanceof ApiRequestError ? error.message : undefined,
+                  ),
+              },
+            );
+            setApproving(null);
+          }}
+        />
       )}
 
       {can('drawing:create') && (
@@ -639,7 +738,7 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
           <input
             className="input input-sm"
             placeholder="Add a drawing or document…"
-            aria-label="Design file name"
+            aria-label="Drawing file name"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
           />
@@ -658,9 +757,19 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
   const toast = useToast();
   const update = useUpdateWorkItem(project.id);
   const create = useCreateWorkItem(project.id);
+  const createMaterial = useCreateMaterial(project.id);
   const remove = useDeleteWorkItem(project.id);
   const bulk = useBulkDesign(project.id);
   const [draft, setDraft] = useState('');
+
+  /** The activity whose comments and revisions are open, if any. */
+  const [openItem, setOpenItem] = useState<string | null>(null);
+  /** The activity being marked designed, held while its note is written. */
+  const [approving, setApproving] = useState<WorkItem | null>(null);
+  /** The activity a material is being raised against. */
+  const [sourcing, setSourcing] = useState<WorkItem | null>(null);
+  const [materialName, setMaterialName] = useState('');
+  const [materialDate, setMaterialDate] = useState('');
 
   if (!phase) return <EmptyState title="No phases in use on this project yet" />;
 
@@ -677,7 +786,7 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
           {phase.name}
         </span>
       }
-      description={`${done} of ${items.length} designed. Site work on an item cannot start until its design is issued here.`}
+      description={`${done} of ${items.length} drawings issued. Site work cannot start on an item until its drawing is issued here.`}
       actions={
         canEdit &&
         items.length > 0 && (
@@ -724,10 +833,11 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                 <tr>
                   <th style={{ width: 36 }} />
                   <th>Work item</th>
-                  <th>Design expected</th>
-                  <th>Design issued</th>
+                  <th>Rev</th>
+                  <th>Drawing expected</th>
+                  <th>Drawing issued</th>
                   <th>Build status</th>
-                  <th style={{ width: 40 }} />
+                  <th style={{ width: 132 }} />
                 </tr>
               </thead>
               <tbody>
@@ -738,7 +848,14 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                         checked={item.designComplete}
                         disabled={!canEdit}
                         label={`Mark ${item.name} designed`}
-                        onChange={(next) => update.mutate({ id: item.id, designComplete: next })}
+                        onChange={(next) => {
+                          // Approving opens the note prompt; un-approving does
+                          // not — reversing a tick is usually a correction, and
+                          // asking for a reason every time trains people to
+                          // dismiss the dialog without reading it.
+                          if (next) setApproving(item);
+                          else update.mutate({ id: item.id, designComplete: false });
+                        }}
                       />
                     </td>
                     <td data-label="Work item">
@@ -751,13 +868,18 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                         {item.name}
                       </span>
                     </td>
-                    <td data-label="Design expected">
+                    <td data-label="Rev">
+                      <span className="rev-chip" data-issued={item.currentRevision > 0}>
+                        {formatRevision(item.currentRevision)}
+                      </span>
+                    </td>
+                    <td data-label="Drawing expected">
                       {canEdit ? (
                         <input
                           className="input input-sm"
                           style={{ width: 138 }}
                           type="date"
-                          aria-label={`Design expected date for ${item.name}`}
+                          aria-label={`Drawing expected date for ${item.name}`}
                           defaultValue={item.designExpectedDate ?? ''}
                           onChange={(event) =>
                             update.mutate({
@@ -780,14 +902,14 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                         </div>
                       )}
                     </td>
-                    <td data-label="Design issued">
+                    <td data-label="Drawing issued">
                       {item.designComplete ? (
                         canEdit ? (
                           <input
                             className="input input-sm"
                             style={{ width: 138 }}
                             type="date"
-                            aria-label={`Design issued date for ${item.name}`}
+                            aria-label={`Drawing issued date for ${item.name}`}
                             defaultValue={item.designCompletedDate ?? ''}
                             onChange={(event) =>
                               update.mutate({
@@ -809,21 +931,55 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                       <ActivityStatusBadge status={item.executionStatus} />
                     </td>
                     <td>
-                      {can('activity:delete') && (
-                        <DeleteButton
-                          label={item.name}
-                          title="Delete work item"
-                          message={
-                            <>
-                              <strong>{item.name}</strong> will be removed from both Design &rarr;{' '}
-                              {phase.name} and Execution &rarr; {phase.name} — they are one row
-                              shown twice, not two. Any material linked to it stays, but loses its
-                              link.
-                            </>
-                          }
-                          onDelete={() => remove.mutate(item.id)}
-                        />
-                      )}
+                      <span className="row gap-1">
+                        {/* Comment count doubles as the affordance: an activity
+                            with discussion advertises it, one without still has
+                            a way in. */}
+                        <button
+                          type="button"
+                          className="row-action"
+                          aria-label={`Comments and revisions for ${item.name}`}
+                          title="Comments and revisions"
+                          onClick={() => setOpenItem(item.id)}
+                        >
+                          <IconMessage size={13} />
+                          {item.comments.length > 0 && (
+                            <span className="row-action-count">{item.comments.length}</span>
+                          )}
+                        </button>
+
+                        {can('material:create') && (
+                          <button
+                            type="button"
+                            className="row-action"
+                            aria-label={`Order a material for ${item.name}`}
+                            title="Order a material for this item"
+                            onClick={() => {
+                              setSourcing(item);
+                              setMaterialName('');
+                              setMaterialDate('');
+                            }}
+                          >
+                            <IconProcurement size={13} />
+                          </button>
+                        )}
+
+                        {can('activity:delete') && (
+                          <DeleteButton
+                            label={item.name}
+                            title="Delete work item"
+                            message={
+                              <>
+                                <strong>{item.name}</strong> will be removed from both Drawing
+                                &rarr; {phase.name} and Execution &rarr; {phase.name} — they are one
+                                row shown twice, not two. Its comments and revision history go with
+                                it. Any material linked to it stays, but loses its link.
+                              </>
+                            }
+                            onDelete={() => remove.mutate(item.id)}
+                          />
+                        )}
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -831,6 +987,126 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
             </table>
           </div>
         </>
+      )}
+
+      {openItem && (
+        <ActivityDrawer
+          projectId={project.id}
+          // Read back from the project rather than held in state, so the panel
+          // re-renders with a new comment the moment the query invalidates.
+          subject={{ kind: 'workItem', item: items.find((w) => w.id === openItem) ?? items[0] }}
+          onClose={() => setOpenItem(null)}
+        />
+      )}
+
+      {approving && (
+        <CommentPrompt
+          title="Mark drawing issued"
+          confirmLabel="Mark issued"
+          loading={update.isPending}
+          message={
+            <>
+              <strong>{approving.name}</strong> will be recorded as issued, which unblocks site work
+              on it once its materials have arrived.
+            </>
+          }
+          onCancel={() => setApproving(null)}
+          onConfirm={(comment) => {
+            update.mutate(
+              { id: approving.id, designComplete: true, comment },
+              {
+                onError: (error) =>
+                  toast.error(
+                    'Could not mark that issued',
+                    error instanceof ApiRequestError ? error.message : undefined,
+                  ),
+              },
+            );
+            setApproving(null);
+          }}
+        />
+      )}
+
+      {/* Raising a material from the drawing rather than from the Materials
+          section. Same row either way — the phase and the link are simply
+          implied by where it was raised, instead of being re-selected. */}
+      {sourcing && (
+        <Modal
+          title="Order a material"
+          description={
+            <>
+              Tagged <strong>{phase.name}</strong> and linked to <strong>{sourcing.name}</strong>,
+              which cannot be completed until it arrives.
+            </>
+          }
+          onClose={() => setSourcing(null)}
+          footer={
+            <>
+              <Button onClick={() => setSourcing(null)}>Cancel</Button>
+              <Button
+                variant="primary"
+                loading={createMaterial.isPending}
+                disabled={!materialName.trim()}
+                onClick={() => {
+                  createMaterial.mutate(
+                    {
+                      phaseId: phase.id,
+                      name: materialName.trim(),
+                      orderByDate: materialDate || null,
+                      workItemId: sourcing.id,
+                    },
+                    {
+                      onSuccess: () => {
+                        toast.success(
+                          'Material added',
+                          `${materialName.trim()} now gates ${sourcing.name}.`,
+                        );
+                        setSourcing(null);
+                      },
+                      onError: (error) =>
+                        toast.error(
+                          'Could not add that material',
+                          error instanceof ApiRequestError ? error.message : undefined,
+                        ),
+                    },
+                  );
+                }}
+              >
+                <IconPlus size={14} />
+                Add material
+              </Button>
+            </>
+          }
+        >
+          <div className="field">
+            <label className="label" htmlFor="quick-material-name">
+              Material
+            </label>
+            <input
+              id="quick-material-name"
+              className="input"
+              autoFocus
+              placeholder="e.g. Floor tiles"
+              value={materialName}
+              onChange={(event) => setMaterialName(event.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label className="label" htmlFor="quick-material-date">
+              Order by <span className="text-tertiary">(optional)</span>
+            </label>
+            <input
+              id="quick-material-date"
+              className="input"
+              type="date"
+              value={materialDate}
+              onChange={(event) => setMaterialDate(event.target.value)}
+            />
+            <p className="text-2xs text-tertiary">
+              Leave blank if the date is not known yet — it can be set later in Materials.
+            </p>
+          </div>
+        </Modal>
       )}
 
       {can('activity:create') && (
@@ -1285,7 +1561,7 @@ function AddMaterialForm({ project, phases }: { project: ProjectDetail; phases: 
 
         {linkable.length === 0 && (
           <p className="text-xs text-tertiary">
-            No work items in this phase yet — add them under Design →{' '}
+            No work items in this phase yet — add them under Drawing →{' '}
             {phases.find((p) => p.id === phaseId)?.name ?? 'the phase'} first, and they will be
             offered here.
           </p>
@@ -1303,47 +1579,47 @@ function AddMaterialForm({ project, phases }: { project: ProjectDetail; phases: 
 // Section 3 — Execution
 // ---------------------------------------------------------------------------
 
+/**
+ * Execution, stacked like Drawing.
+ *
+ * Same reasoning: Civil and Finishing are read together, and a tab hid whatever
+ * was outstanding in the other one. The Timeline that used to head this section
+ * now sits above the tabs, where it describes the whole project.
+ */
 function ExecutionSection({ project }: { project: ProjectDetail }) {
-  const { settings } = useAuth();
   const phases = useProjectPhases(project);
-  const [sub, setSub] = useSubSection(phases[0]?.id ?? '');
 
   if (phases.length === 0) return <NoPhasesYet />;
 
-  const activePhase = phases.find((p) => p.id === sub) ?? phases[0];
-  const items = project.workItems.filter((w) => w.phase.id === activePhase.id);
-  const hasDatedWork = project.workItems.some(
-    (w) => w.plannedStart || w.plannedEnd || w.actualStart || w.actualEnd,
-  );
+  const jump = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   return (
     <div className="stack gap-5">
-      {hasDatedWork && (
-        <Card
-          title="Programme"
-          icon={<IconGantt size={16} />}
-          description="Built from each work item's own planned and actual dates. Hatched bars are late or blocked on materials."
-        >
-          <ProgrammeChart
-            workItems={project.workItems}
-            handoverDate={project.handoverDate}
-            locale={settings.locale}
-          />
-        </Card>
+      {phases.length > 1 && (
+        <nav className="jump-nav no-print" aria-label="Jump to a phase">
+          {phases.map((phase) => (
+            <button key={phase.id} type="button" onClick={() => jump(`execution-${phase.id}`)}>
+              <span className="phase-swatch" style={{ background: phase.colour }} />
+              {phase.name}
+              <span className="jump-count">
+                {project.workItems.filter((w) => w.phase.id === phase.id).length}
+              </span>
+            </button>
+          ))}
+        </nav>
       )}
 
-      <SubNav
-        options={phases.map((phase) => ({
-          id: phase.id,
-          label: phase.name,
-          count: project.workItems.filter((w) => w.phase.id === phase.id).length,
-          colour: phase.colour,
-        }))}
-        active={activePhase.id}
-        onSelect={setSub}
-      />
-
-      <ExecutionPhasePanel project={project} phase={activePhase} items={items} />
+      {phases.map((phase) => (
+        <div key={phase.id} id={`execution-${phase.id}`} className="scroll-anchor">
+          <ExecutionPhasePanel
+            project={project}
+            phase={phase}
+            items={project.workItems.filter((w) => w.phase.id === phase.id)}
+          />
+        </div>
+      ))}
     </div>
   );
 }
@@ -1355,7 +1631,7 @@ function NoPhasesYet() {
     <EmptyState
       icon={<IconLayers size={20} />}
       title="No work phases defined"
-      message="Design and Execution are organised into phases such as Civil and Finishing. An administrator sets these up once, and every project then uses them."
+      message="Drawing and Execution are organised into phases such as Civil and Finishing. An administrator sets these up once, and every project then uses them."
       action={
         can('org:update') ? (
           <Link to="/settings/phases" className="btn btn-primary">
@@ -1383,6 +1659,16 @@ function ExecutionPhasePanel({
   const remove = useDeleteWorkItem(project.id);
   const toast = useToast();
   const [draft, setDraft] = useState('');
+
+  const [openItem, setOpenItem] = useState<string | null>(null);
+  /**
+   * A status change waiting on its note.
+   *
+   * Only the two that mean something is finished or under way prompt — moving
+   * to Blocked or back to Not started is usually a correction, and prompting on
+   * every transition trains people to dismiss the dialog unread.
+   */
+  const [pending, setPending] = useState<{ item: WorkItem; status: ActivityStatus } | null>(null);
 
   const canEdit = can('activity:update');
   const done = items.filter((w) => w.executionStatus === 'DONE').length;
@@ -1416,7 +1702,7 @@ function ExecutionPhasePanel({
           {phase.name}
         </span>
       }
-      description={`${done} of ${items.length} complete. Same rows as Design → ${phase.name}.`}
+      description={`${done} of ${items.length} complete. Same rows as Drawing → ${phase.name}.`}
       padded={false}
     >
       {blocked.length > 0 && (
@@ -1446,7 +1732,7 @@ function ExecutionPhasePanel({
           <EmptyState
             icon={<IconGantt size={20} />}
             title={`No ${phase.name.toLowerCase()} work items yet`}
-            message={`Add the packages of work being built in this phase. Each one also appears under Design → ${phase.name}, where you track whether its design has been issued.`}
+            message={`Add the packages of work being built in this phase. Each one also appears under Drawing → ${phase.name}, where you track whether its drawing has been issued.`}
           />
         </div>
       ) : (
@@ -1518,9 +1804,14 @@ function ExecutionPhasePanel({
                           aria-label={`Status for ${item.name}`}
                           title={isBlocked ? item.gate.reasons.join(' and ') : undefined}
                           value={item.executionStatus}
-                          onChange={(event) =>
-                            patch(item.id, item.name, { executionStatus: event.target.value })
-                          }
+                          onChange={(event) => {
+                            const next = event.target.value as ActivityStatus;
+                            if (next === 'DONE' || next === 'IN_PROGRESS') {
+                              setPending({ item, status: next });
+                            } else {
+                              patch(item.id, item.name, { executionStatus: next });
+                            }
+                          }}
                         >
                           {ACTIVITY_STATUSES.map((status) => {
                             // Both progress statuses are gated. Blocked and Not
@@ -1567,32 +1858,48 @@ function ExecutionPhasePanel({
                       )}
                     </td>
                     <td>
-                      {can('activity:delete') && (
-                        <DeleteButton
-                          label={item.name}
-                          title="Delete work item"
-                          message={
-                            <>
-                              <strong>{item.name}</strong> will be removed from both Execution
-                              &rarr; {phase.name} and Design &rarr; {phase.name} — they are one row
-                              shown twice, not two.
-                              {item.gate.pendingMaterials.length > 0 &&
-                                ` The ${item.gate.pendingMaterials.length} material(s) currently gating it stay on the buying list, but lose their link.`}
-                            </>
-                          }
-                          onDelete={() =>
-                            remove.mutate(item.id, {
-                              onSuccess: () =>
-                                toast.success('Work item deleted', `${item.name} was removed.`),
-                              onError: (error) =>
-                                toast.error(
-                                  'Could not delete this work item',
-                                  error instanceof ApiRequestError ? error.message : undefined,
-                                ),
-                            })
-                          }
-                        />
-                      )}
+                      <span className="row gap-1">
+                        <button
+                          type="button"
+                          className="row-action"
+                          aria-label={`Comments and revisions for ${item.name}`}
+                          title="Comments and revisions"
+                          onClick={() => setOpenItem(item.id)}
+                        >
+                          <IconMessage size={13} />
+                          {item.comments.length > 0 && (
+                            <span className="row-action-count">{item.comments.length}</span>
+                          )}
+                        </button>
+
+                        {can('activity:delete') && (
+                          <DeleteButton
+                            label={item.name}
+                            title="Delete work item"
+                            message={
+                              <>
+                                <strong>{item.name}</strong> will be removed from both Execution
+                                &rarr; {phase.name} and Drawing &rarr; {phase.name} — they are one
+                                row shown twice, not two. Its comments and revision history go with
+                                it.
+                                {item.gate.pendingMaterials.length > 0 &&
+                                  ` The ${item.gate.pendingMaterials.length} material(s) currently gating it stay on the buying list, but lose their link.`}
+                              </>
+                            }
+                            onDelete={() =>
+                              remove.mutate(item.id, {
+                                onSuccess: () =>
+                                  toast.success('Work item deleted', `${item.name} was removed.`),
+                                onError: (error) =>
+                                  toast.error(
+                                    'Could not delete this work item',
+                                    error instanceof ApiRequestError ? error.message : undefined,
+                                  ),
+                              })
+                            }
+                          />
+                        )}
+                      </span>
                     </td>
                   </tr>
                 );
@@ -1600,6 +1907,40 @@ function ExecutionPhasePanel({
             </tbody>
           </table>
         </div>
+      )}
+
+      {openItem && (
+        <ActivityDrawer
+          projectId={project.id}
+          subject={{ kind: 'workItem', item: items.find((w) => w.id === openItem) ?? items[0] }}
+          onClose={() => setOpenItem(null)}
+        />
+      )}
+
+      {pending && (
+        <CommentPrompt
+          title={
+            pending.status === 'DONE'
+              ? 'Mark complete'
+              : `Mark ${ACTIVITY_STATUS_LABELS[pending.status].toLowerCase()}`
+          }
+          confirmLabel={pending.status === 'DONE' ? 'Mark complete' : 'Confirm'}
+          loading={update.isPending}
+          message={
+            <>
+              <strong>{pending.item.name}</strong> will move to{' '}
+              {ACTIVITY_STATUS_LABELS[pending.status]}.
+            </>
+          }
+          onCancel={() => setPending(null)}
+          onConfirm={(comment) => {
+            patch(pending.item.id, pending.item.name, {
+              executionStatus: pending.status,
+              ...(comment ? { comment } : {}),
+            });
+            setPending(null);
+          }}
+        />
       )}
 
       {can('activity:create') && (
@@ -1614,7 +1955,7 @@ function ExecutionPhasePanel({
               {
                 onSuccess: () => {
                   setDraft('');
-                  toast.success('Work item added', `It is now in Design → ${phase.name} too.`);
+                  toast.success('Work item added', `It is now in Drawing → ${phase.name} too.`);
                 },
                 onError: (error) =>
                   toast.error(

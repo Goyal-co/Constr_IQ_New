@@ -2,11 +2,13 @@ import { Prisma } from '@prisma/client';
 import type {
   Category as PrismaCategory,
   DesignFile as PrismaDesignFile,
+  DrawingRevision as PrismaDrawingRevision,
   Material as PrismaMaterial,
   Phase as PrismaPhase,
   Project as PrismaProject,
   User as PrismaUser,
   WorkItem as PrismaWorkItem,
+  ActivityComment as PrismaActivityComment,
 } from '@prisma/client';
 import {
   blockingMaterialsFor,
@@ -22,7 +24,9 @@ import {
   isMaterialBlocking,
   toIsoDate,
   type ActivityStatus,
+  type CommentKind,
   type DesignFile,
+  type DrawingRevision,
   type Material,
   type MaterialLink,
   type MaterialStatus,
@@ -32,6 +36,7 @@ import {
   type ProjectStatus,
   type ProjectSummary,
   type WorkItem,
+  type ActivityComment,
   type WorkItemRef,
 } from '@ciq/shared';
 import { toCategory } from '../categories/categories.service';
@@ -47,7 +52,12 @@ import { toUserSummary } from '../users/user.mapper';
  * those facts lives in exactly one place.
  */
 
-export type DesignFileWithRelations = PrismaDesignFile & { completedBy?: PrismaUser | null };
+export type DesignFileWithRelations = PrismaDesignFile & {
+  completedBy?: PrismaUser | null;
+  /** Optional: absent on the list query, present on a project detail. */
+  comments?: (PrismaActivityComment & { author?: PrismaUser | null })[];
+  revisions?: (PrismaDrawingRevision & { issuedBy?: PrismaUser | null })[];
+};
 
 export type MaterialWithRelations = PrismaMaterial & {
   phase: PrismaPhase;
@@ -58,6 +68,9 @@ export type WorkItemWithRelations = PrismaWorkItem & {
   phase: PrismaPhase;
   designedBy?: PrismaUser | null;
   assignee?: PrismaUser | null;
+  /** Optional: absent on the list query, present on a project detail. */
+  comments?: (PrismaActivityComment & { author?: PrismaUser | null })[];
+  revisions?: (PrismaDrawingRevision & { issuedBy?: PrismaUser | null })[];
 };
 
 export type ProjectWithRelations = PrismaProject & {
@@ -95,6 +108,10 @@ export function toDesignFile(
     updatedAt: row.updatedAt.toISOString(),
     daysUntilExpected: row.expectedDate ? diffDays(now, row.expectedDate) : null,
     isOverdue: isDesignOverdue(row.expectedDate, row.isComplete, now),
+    currentRevision: row.currentRevision,
+    revisions: (row.revisions ?? []).map(toDrawingRevision),
+    comments: (row.comments ?? []).map(toActivityComment),
+
     daysLate: designSlippageDays(row.expectedDate, row.completedDate),
   };
 }
@@ -175,6 +192,39 @@ function toMaterialLink(
 // Work items — the rows shared by Design and Execution
 // ---------------------------------------------------------------------------
 
+export function toActivityComment(
+  row: PrismaActivityComment & { author?: PrismaUser | null },
+): ActivityComment {
+  return {
+    id: row.id,
+    workItemId: row.workItemId,
+    designFileId: row.designFileId,
+    kind: row.kind as CommentKind,
+    body: row.body,
+    // Stored as plain strings so old comments stay readable if the status
+    // vocabulary changes; cast back at the boundary for the client's benefit.
+    statusFrom: (row.statusFrom as ActivityStatus | null) ?? null,
+    statusTo: (row.statusTo as ActivityStatus | null) ?? null,
+    author: row.author ? toUserSummary(row.author) : null,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export function toDrawingRevision(
+  row: PrismaDrawingRevision & { issuedBy?: PrismaUser | null },
+): DrawingRevision {
+  return {
+    id: row.id,
+    workItemId: row.workItemId,
+    designFileId: row.designFileId,
+    revision: row.revision,
+    notes: row.notes,
+    issuedDate: toIsoDate(row.issuedDate),
+    issuedBy: row.issuedBy ? toUserSummary(row.issuedBy) : null,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 export function toWorkItem(
   row: WorkItemWithRelations,
   /** All the project's materials, so gating resolves without an extra query. */
@@ -227,6 +277,13 @@ export function toWorkItem(
       },
       now,
     ),
+
+    // Denormalised on the row, so a list does not need one query per item.
+    currentRevision: row.currentRevision,
+    // Newest first: the current revision and the latest remark are what a
+    // reader wants, and older ones are history they scroll to.
+    revisions: (row.revisions ?? []).map(toDrawingRevision),
+    comments: (row.comments ?? []).map(toActivityComment),
 
     linkedMaterials: linked.map((m) => toMaterialLink(m, settings, now)),
     blockingMaterials: linked
@@ -444,11 +501,31 @@ export const PROJECT_INCLUDE = {
   },
 } satisfies Prisma.ProjectInclude;
 
+/**
+ * The detail view carries comments and revisions; the list view does not.
+ *
+ * A board showing forty projects has no use for their comment threads, and
+ * fetching them would multiply the row count for something nobody reads there.
+ * Both are ordered newest-first, which is the order they render in.
+ */
 export const PROJECT_DETAIL_INCLUDE = {
   ...PROJECT_INCLUDE,
-  designFiles: { include: { completedBy: true }, orderBy: { position: 'asc' } },
+  designFiles: {
+    include: {
+      completedBy: true,
+      comments: { include: { author: true }, orderBy: { createdAt: 'desc' } },
+      revisions: { include: { issuedBy: true }, orderBy: { revision: 'desc' } },
+    },
+    orderBy: { position: 'asc' },
+  },
   workItems: {
-    include: { phase: true, assignee: true, designedBy: true },
+    include: {
+      phase: true,
+      assignee: true,
+      designedBy: true,
+      comments: { include: { author: true }, orderBy: { createdAt: 'desc' } },
+      revisions: { include: { issuedBy: true }, orderBy: { revision: 'desc' } },
+    },
     orderBy: [{ phase: { position: 'asc' } }, { position: 'asc' }],
   },
   members: { include: { user: true }, orderBy: { addedAt: 'asc' } },

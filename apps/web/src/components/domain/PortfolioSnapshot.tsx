@@ -115,7 +115,7 @@ export function PortfolioSnapshot({
         <span className="eyebrow">Progress</span>
         <div className="stack gap-3" style={{ marginTop: 'var(--space-2)' }}>
           <Meter
-            label="Design"
+            label="Drawings"
             pct={kpis.designPct}
             detail={`${kpis.designComplete} of ${kpis.designTotal} issued`}
             colour={TRACK_COLOUR.design}

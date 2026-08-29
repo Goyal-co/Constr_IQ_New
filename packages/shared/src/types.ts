@@ -10,6 +10,7 @@
 
 import type {
   ActivityStatus,
+  CommentKind,
   MaterialStatus,
   ProcurementState,
   ProjectStatus,
@@ -143,6 +144,13 @@ export interface DesignFile {
   isOverdue: boolean;
   /** Derived: issued later than expected, in days. Null when not applicable. */
   daysLate: number | null;
+
+  /** The revision in force, or 0 when nothing has been issued. */
+  currentRevision: number;
+  /** Issue history, newest first. */
+  revisions: DrawingRevision[];
+  /** Discussion on this drawing, newest first. */
+  comments: ActivityComment[];
 }
 
 /**
@@ -153,6 +161,40 @@ export interface DesignFile {
  * been built. Adding one in Design makes it appear in Execution immediately,
  * because there is only ever one row.
  */
+/**
+ * A comment on an activity — a drawing file or a work item.
+ *
+ * Named for what it attaches to rather than for one of the two, because both
+ * carry the same thread and render through the same component.
+ */
+export interface ActivityComment {
+  id: string;
+  /** Exactly one of these is set. */
+  workItemId: string | null;
+  designFileId: string | null;
+  kind: CommentKind;
+  body: string;
+  /** Present when the comment accompanied an execution status change. */
+  statusFrom: ActivityStatus | null;
+  statusTo: ActivityStatus | null;
+  author: UserSummary | null;
+  createdAt: string;
+}
+
+/** One issued version of an activity's drawing. */
+export interface DrawingRevision {
+  id: string;
+  /** Exactly one of these is set. */
+  workItemId: string | null;
+  designFileId: string | null;
+  /** 1-based. Displayed as R1, R2, R3 — see `formatRevision`. */
+  revision: number;
+  notes: string | null;
+  issuedDate: IsoDate | null;
+  issuedBy: UserSummary | null;
+  createdAt: string;
+}
+
 export interface WorkItem {
   id: string;
   projectId: string;
@@ -163,8 +205,20 @@ export interface WorkItem {
   attachmentCount: number;
   updatedAt: string;
 
-  // --- Design track --------------------------------------------------------
+  // --- Drawing track -------------------------------------------------------
   designComplete: boolean;
+
+  /**
+   * The revision currently in force, or 0 when nothing has been issued.
+   * Denormalised from the revision history so a list does not need one query
+   * per row to show it.
+   */
+  currentRevision: number;
+  /** Full issue history, newest first. */
+  revisions: DrawingRevision[];
+
+  /** Discussion on this activity, newest first. */
+  comments: ActivityComment[];
   /** When the design is due to be issued. */
   designExpectedDate: IsoDate | null;
   /** Stamped when the design is marked issued; cleared if reopened. */

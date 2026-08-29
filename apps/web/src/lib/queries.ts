@@ -288,6 +288,22 @@ export const useDeleteDesignFile = (projectId: string) =>
     projectId,
   );
 
+/** Comment on a drawing. Mirrors `useAddComment` for work items. */
+export const useAddDesignFileComment = (projectId: string) =>
+  useProjectMutation(
+    ({ id, body }: { id: string; body: string }) =>
+      api.post<DesignFile>(`/projects/${projectId}/design-files/${id}/comments`, { body }),
+    projectId,
+  );
+
+/** Issue the next revision of a drawing. The number is assigned server-side. */
+export const useAddDesignFileRevision = (projectId: string) =>
+  useProjectMutation(
+    ({ id, ...dto }: { id: string; notes?: string; issuedDate?: string | null }) =>
+      api.post<DesignFile>(`/projects/${projectId}/design-files/${id}/revisions`, dto),
+    projectId,
+  );
+
 export const useBulkDesignFiles = (projectId: string) =>
   useProjectMutation(
     (dto: { isComplete: boolean }) => api.patch(`/projects/${projectId}/design-files/bulk`, dto),
@@ -310,6 +326,27 @@ export const useUpdateWorkItem = (projectId: string) =>
   useProjectMutation(
     ({ id, ...dto }: UpdateWorkItemDto & { id: string }) =>
       api.patch<WorkItem>(`/projects/${projectId}/work-items/${id}`, dto),
+    projectId,
+  );
+
+/**
+ * Comment on an activity without changing anything else.
+ *
+ * A comment made *with* a change rides on `useUpdateWorkItem`'s `comment`
+ * field instead, so the note and the transition it explains commit together.
+ */
+export const useAddComment = (projectId: string) =>
+  useProjectMutation(
+    ({ id, body }: { id: string; body: string }) =>
+      api.post<WorkItem>(`/projects/${projectId}/work-items/${id}/comments`, { body }),
+    projectId,
+  );
+
+/** Issues the next revision. The number is assigned by the server. */
+export const useAddRevision = (projectId: string) =>
+  useProjectMutation(
+    ({ id, ...dto }: { id: string; notes?: string; issuedDate?: string | null }) =>
+      api.post<WorkItem>(`/projects/${projectId}/work-items/${id}/revisions`, dto),
     projectId,
   );
 

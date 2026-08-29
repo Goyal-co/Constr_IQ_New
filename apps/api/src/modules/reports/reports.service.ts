@@ -60,6 +60,9 @@ export class ReportsService {
           deletedAt: null,
           ...(query.categoryId ? { categoryId: query.categoryId } : {}),
           ...(query.managerId ? { managerId: query.managerId } : {}),
+          // Scoping to one project makes every figure below describe that
+          // project alone, which is the point of the filter.
+          ...(query.projectId ? { id: query.projectId } : {}),
           ...(query.scope === 'active' ? { status: { not: 'COMPLETED' as const } } : {}),
           ...(query.scope === 'completed' ? { status: 'COMPLETED' as const } : {}),
         },

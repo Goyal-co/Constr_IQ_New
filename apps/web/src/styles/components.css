@@ -2045,3 +2045,188 @@ tr:hover .row-action,
   right: var(--space-3);
   z-index: 1;
 }
+
+/* ==========================================================================
+   Jump navigation
+   ==========================================================================
+   Replaces the sub-section tabs in Drawing and Execution. It looks similar and
+   behaves differently on purpose: these scroll to a block that is already on
+   the page rather than swapping which block exists, so nothing is hidden and
+   the counts beside each label are always true.
+   ========================================================================== */
+
+.jump-nav {
+  position: sticky;
+  top: calc(var(--topbar-height) + var(--space-2));
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: color-mix(in srgb, var(--surface-canvas) 92%, transparent);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.jump-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.jump-nav button:hover {
+  background: var(--surface-raised);
+  border-color: var(--border-default);
+  color: var(--text-primary);
+}
+
+.jump-count {
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+/* Offsets the anchor so a scrolled-to block clears the sticky topbar and the
+   jump bar rather than sliding underneath them. */
+.scroll-anchor {
+  scroll-margin-top: calc(var(--topbar-height) + 64px);
+}
+
+/* ==========================================================================
+   Revisions
+   ========================================================================== */
+
+.rev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rev-chip[data-issued='true'] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent-text);
+}
+
+.rev-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.rev-list li {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.rev-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/* ==========================================================================
+   Comments
+   ========================================================================== */
+
+.comment-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.comment {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.comment-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.comment-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: 3px;
+}
+
+.comment-author {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.comment-time {
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+.comment-text {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
+  /* Preserves the line breaks somebody typed without letting a pasted URL
+     stretch the column. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-transition {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+.comment-empty {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+/* A count riding on a row action, so an activity with discussion advertises it
+   without needing a second column. */
+.row-action-count {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  margin-left: 2px;
+}
+
+.row-action:has(.row-action-count) {
+  width: auto;
+  min-width: 30px;
+  padding: 0 6px;
+  gap: 2px;
+}
