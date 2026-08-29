@@ -61,6 +61,20 @@ enum ActivityStatus {
 /// Kept as an enum rather than inferred from the presence of `statusTo`,
 /// because "why is this blocked" and "why did I approve this" are different
 /// questions and the reader filters on the difference.
+/// Where a revision is in its life.
+///
+/// A revision is raised before it is issued: somebody decides the drawing needs
+/// changing, and days or weeks later the new sheet actually lands. Modelling it
+/// as a single issue event lost that gap entirely — the period when site knows a
+/// change is coming but has nothing to build from is exactly the period worth
+/// seeing.
+enum RevisionStatus {
+  /// Raised. The drawing is being revised and nothing has been issued yet.
+  OPEN
+  /// Closed out. This revision is the one in force.
+  ISSUED
+}
+
 enum CommentKind {
   /// A free note, not tied to any change.
   NOTE
@@ -168,6 +182,7 @@ model User {
   uploads            Attachment[]
   activityComments   ActivityComment[] @relation("CommentAuthor")
   drawingRevisions   DrawingRevision[] @relation("RevisionIssuedBy")
+  openedRevisions    DrawingRevision[] @relation("RevisionOpenedBy")
   auditLogs          AuditLog[]
   notifications      Notification[]
   sentInvitations    Invitation[]      @relation("InvitedBy")
@@ -568,9 +583,16 @@ model DrawingRevision {
   workItemId   String? @db.Uuid
   designFileId String? @db.Uuid
 
-  /// Why it was reissued. The whole reason to keep the history.
-  notes      String?
-  /// When this revision was issued. A calendar date, like every other date here.
+  status RevisionStatus @default(OPEN)
+
+  /// Why it was raised. The whole reason to keep the history.
+  notes String?
+
+  /// Raised: who decided it needed revising, and when.
+  openedAt   DateTime @default(now())
+  openedById String?  @db.Uuid
+
+  /// Issued: null until the revision is closed out.
   issuedDate DateTime? @db.Date
   issuedById String?   @db.Uuid
 
@@ -578,6 +600,7 @@ model DrawingRevision {
 
   workItem   WorkItem?   @relation(fields: [workItemId], references: [id], onDelete: Cascade)
   designFile DesignFile? @relation(fields: [designFileId], references: [id], onDelete: Cascade)
+  openedBy   User?       @relation("RevisionOpenedBy", fields: [openedById], references: [id], onDelete: SetNull)
   issuedBy   User?       @relation("RevisionIssuedBy", fields: [issuedById], references: [id], onDelete: SetNull)
 
   /// Numbering is unique per owner, so R1/R2/R3 mean the same thing on a design
@@ -587,6 +610,7 @@ model DrawingRevision {
   @@index([workItemId, revision])
   @@index([designFileId, revision])
   @@index([issuedById])
+  @@index([openedById])
   @@map("drawing_revisions")
 }
 

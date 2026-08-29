@@ -550,6 +550,47 @@
 }
 
 /* ==========================================================================
+   Programme chart
+   ==========================================================================
+   The chart scrolls sideways on a narrow screen — that is correct for a
+   timeline, and the sticky label column is what makes it work. What does not
+   work is keeping the desktop label width: 210px of a 375px screen leaves
+   about 90px of actual chart, so the reader scrolls a strip. The column
+   narrows instead, and the rows get taller for a thumb.
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  .gantt-wrap {
+    --gantt-label-width: 124px;
+    --gantt-row-height: 40px;
+  }
+
+  .gantt {
+    /* Enough that a month is still legible, small enough that the scroll is a
+       nudge rather than a journey. */
+    min-width: 520px;
+  }
+
+  .gantt-label {
+    font-size: var(--text-xs);
+    padding-right: var(--space-2);
+  }
+
+  /* The axis is dense at this width; every other label is enough to orient. */
+  .gantt-tick:nth-child(even) {
+    display: none;
+  }
+
+  /* Touch has no hover, so the tooltip is the only way to read a bar's dates —
+     it is centred rather than tracking a pointer that does not exist. */
+  .gantt-tip {
+    left: var(--space-4) !important;
+    right: var(--space-4);
+    max-width: none;
+  }
+}
+
+/* ==========================================================================
    Print
    ========================================================================== */
 
@@ -561,5 +602,96 @@
 
   .table-stack tr {
     box-shadow: none;
+  }
+}
+
+/* ==========================================================================
+   Activity rows collapse on mobile
+   ==========================================================================
+   A stacked row card shows every cell — name, four dates, slippage, status,
+   assignee, actions. That is nine stacked lines per activity, so ten
+   activities became a page you scroll for a minute to find one name.
+
+   Collapsed, a row shows what identifies it and what it is doing; tapping
+   opens the rest. The toggle is the row itself, so there is no small target
+   to aim at, and the state is per-row rather than a global "compact" mode
+   nobody would find.
+   ========================================================================== */
+
+@media (max-width: 760px) {
+  /* The summary cell stays; everything else waits for a tap. */
+  .table-stack tr[data-collapsible='true']:not([data-expanded='true']) td:not([data-summary]) {
+    display: none;
+  }
+
+  .table-stack tr[data-collapsible='true'] {
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .table-stack tr[data-collapsible='true'] td[data-summary] {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 0;
+  }
+
+  /* The label prefix is noise on the one cell that is always visible — the
+     name is self-evidently the name. */
+  .table-stack tr[data-collapsible='true'] td[data-summary]::before {
+    content: none;
+  }
+
+  .table-stack tr[data-expanded='true'] td[data-summary] {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .table-stack tr[data-collapsible='true'] td:not([data-summary]) {
+    padding-inline: var(--space-4);
+  }
+
+  .table-stack tr[data-collapsible='true'] td:last-child {
+    padding-bottom: var(--space-3);
+  }
+
+  /* Chevron, rotating to say which way the row will move. */
+  .row-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    margin-left: auto;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-tertiary);
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+
+  tr[data-expanded='true'] .row-toggle {
+    transform: rotate(180deg);
+  }
+}
+
+/* Above the breakpoint the table is a table: nothing collapses and the toggle
+   has no job. */
+@media (min-width: 761px) {
+  .row-toggle {
+    display: none;
+  }
+}
+
+/* The summary chip exists only for a collapsed row; the table's own Rev column
+   carries it at every other size, and rendering both showed it twice. */
+.rev-chip--summary {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  tr[data-collapsible='true']:not([data-expanded='true']) .rev-chip--summary {
+    display: inline-flex;
   }
 }

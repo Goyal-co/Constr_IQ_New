@@ -3,12 +3,14 @@ import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import {
   bulkDesignSchema,
   createCommentSchema,
+  closeRevisionSchema,
   createRevisionSchema,
   createWorkItemSchema,
   reorderSchema,
   updateWorkItemSchema,
   type BulkDesignDto,
   type CreateCommentDto,
+  type CloseRevisionDto,
   type CreateRevisionDto,
   type CreateWorkItemDto,
   type ReorderDto,
@@ -86,16 +88,32 @@ export class WorkItemsController {
   @Post(':id/revisions')
   @RequirePermissions('drawing:update')
   @ApiOperation({
-    summary: 'Issue the next drawing revision — the number is assigned server-side',
+    summary: 'Raise a revision — opens it, does not issue it',
   })
-  addRevision(
+  openRevision(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body(zodBody(createRevisionSchema)) dto: CreateRevisionDto,
     @ClientInfo() client: ClientMeta,
   ) {
-    return this.workItems.addRevision(actor, projectId, id, dto, client);
+    return this.workItems.openRevision(actor, projectId, id, dto, client);
+  }
+
+  @Patch(':id/revisions/:revisionId/close')
+  @RequirePermissions('drawing:update')
+  @ApiOperation({
+    summary: 'Close a revision out — the reissued drawing has landed',
+  })
+  closeRevision(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Body(zodBody(closeRevisionSchema)) dto: CloseRevisionDto,
+    @ClientInfo() client: ClientMeta,
+  ) {
+    return this.workItems.closeRevision(actor, projectId, id, revisionId, dto, client);
   }
 
   @Patch(':id')

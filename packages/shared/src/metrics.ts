@@ -406,6 +406,19 @@ export interface ProgrammeActivityInput {
   name: string;
   phase: PhaseRef;
   executionStatus: ActivityStatus;
+
+  /**
+   * The drawing track.
+   *
+   * An activity is one thing that goes through drawing and then construction,
+   * so both belong on its one row. Splitting them across sections meant reading
+   * "when was the ceiling drawn" and "when was it built" as two separate
+   * lookups about the same ceiling.
+   */
+  designExpectedDate?: string | Date | null;
+  designCompletedDate?: string | Date | null;
+  designComplete?: boolean;
+
   plannedStart: string | Date | null;
   plannedEnd: string | Date | null;
   actualStart: string | Date | null;
@@ -423,6 +436,56 @@ export interface ProgrammeBar {
   planned: { start: Date; end: Date; offsetPct: number; widthPct: number } | null;
   actual: { start: Date; end: Date; offsetPct: number; widthPct: number } | null;
   slippage: Slippage | null;
+
+  /**
+   * When this activity's drawing was due and issued, positioned on the same
+   * scale as its build. Null when neither date is set.
+   *
+   * Points rather than a span: a drawing has a due date and an issue date and
+   * no duration in between that anybody entered.
+   */
+  design: {
+    expectedDate: Date | null;
+    expectedPct: number | null;
+    actualDate: Date | null;
+    actualPct: number | null;
+    /** Outstanding with its due date already passed. */
+    isOverdue: boolean;
+    /** Issued later than due, in days. */
+    daysLate: number | null;
+  } | null;
+}
+
+/**
+ * A drawing on the timeline.
+ *
+ * A drawing has a due date and an issued date — two instants, no duration — so
+ * it is a milestone, not a bar. Forcing it into a bar would invent a start date
+ * nobody entered and imply work spanning a period the data never claims.
+ */
+export interface ProgrammeMilestoneInput {
+  id: string;
+  name: string;
+  /** When it is due to be issued. */
+  expected: string | Date | null;
+  /** When it actually was. */
+  actual: string | Date | null;
+  isComplete: boolean;
+}
+
+export interface ProgrammeMilestone {
+  id: string;
+  name: string;
+  isComplete: boolean;
+  expectedDate: Date | null;
+  /** Position of the due date, or null when it is unset. */
+  expectedPct: number | null;
+  actualDate: Date | null;
+  actualPct: number | null;
+  /** Outstanding with its due date already passed. */
+  isOverdue: boolean;
+  /** Issued later than due, in days. Null when not applicable. */
+  daysLate: number | null;
 }
 
 export interface ProgrammeTick {
@@ -435,6 +498,8 @@ export interface ProgrammeChart {
   windowEnd: Date;
   totalDays: number;
   bars: ProgrammeBar[];
+  /** Drawings, drawn as points rather than spans. */
+  milestones: ProgrammeMilestone[];
   ticks: ProgrammeTick[];
   /** Position of today within the window, or null when today falls outside it. */
   todayPct: number | null;
@@ -459,13 +524,46 @@ export function buildProgrammeChart(
   items: ProgrammeActivityInput[],
   handover: Date | null = null,
   now: Date = todayUtc(),
+  /** Drawings. Appended last so existing calls are unaffected. */
+  milestoneInputs: ProgrammeMilestoneInput[] = [],
 ): ProgrammeChart | null {
-  const dated = items.filter((a) => a.plannedStart || a.plannedEnd || a.actualStart || a.actualEnd);
-  if (dated.length === 0) return null;
+  const dated = items.filter(
+    (a) =>
+      a.plannedStart ||
+      a.plannedEnd ||
+      a.actualStart ||
+      a.actualEnd ||
+      // Drawn but not yet programmed is a real state, and the row should show
+      // the drawing rather than vanish until somebody adds build dates.
+      a.designExpectedDate ||
+      a.designCompletedDate,
+  );
+  const datedMilestones = milestoneInputs.filter((m) => m.expected || m.actual);
+
+  // A project with drawings but no dated activities still has a timeline worth
+  // showing — the drawing programme is usually what exists first.
+  if (dated.length === 0 && datedMilestones.length === 0) return null;
 
   const points: Date[] = [];
   for (const item of dated) {
-    for (const value of [item.plannedStart, item.plannedEnd, item.actualStart, item.actualEnd]) {
+    for (const value of [
+      item.plannedStart,
+      item.plannedEnd,
+      item.actualStart,
+      item.actualEnd,
+      // The drawing dates sit on the same row, so they must widen the same
+      // window — a ceiling drawn in March and built in June needs both ends.
+      item.designExpectedDate,
+      item.designCompletedDate,
+    ]) {
+      const date = asDate(value);
+      if (date) points.push(date);
+    }
+  }
+  // Drawing dates widen the window too, or a drawing due before the first
+  // activity starts would sit off the left edge.
+  for (const milestone of datedMilestones) {
+    for (const value of [milestone.expected, milestone.actual]) {
       const date = asDate(value);
       if (date) points.push(date);
     }
@@ -524,6 +622,20 @@ export function buildProgrammeChart(
       isBlocked: item.isBlocked ?? false,
       planned: span(plannedStart, plannedEnd),
       actual: span(actualStart, actualClose),
+      design: (() => {
+        const expected = asDate(item.designExpectedDate ?? null);
+        const actual = asDate(item.designCompletedDate ?? null);
+        if (!expected && !actual) return null;
+        const late = expected && actual ? Math.max(diffDays(expected, actual), 0) : 0;
+        return {
+          expectedDate: expected,
+          expectedPct: expected ? position(expected) : null,
+          actualDate: actual,
+          actualPct: actual ? position(actual) : null,
+          isOverdue: !item.designComplete && expected !== null && expected < now,
+          daysLate: late > 0 ? late : null,
+        };
+      })(),
       slippage: computeSlippage(
         {
           designComplete: true,
@@ -534,6 +646,31 @@ export function buildProgrammeChart(
         now,
       ),
     };
+  });
+
+  const milestones: ProgrammeMilestone[] = datedMilestones.map((milestone) => {
+    const expected = asDate(milestone.expected);
+    const actual = asDate(milestone.actual);
+    const late = expected && actual ? Math.max(diffDays(expected, actual), 0) : 0;
+    return {
+      id: milestone.id,
+      name: milestone.name,
+      isComplete: milestone.isComplete,
+      expectedDate: expected,
+      expectedPct: expected ? position(expected) : null,
+      actualDate: actual,
+      actualPct: actual ? position(actual) : null,
+      isOverdue: !milestone.isComplete && expected !== null && expected < now,
+      daysLate: late > 0 ? late : null,
+    };
+  });
+
+  // Due date order: a drawing programme reads as a sequence of deadlines, and
+  // sorting by name would scatter that sequence.
+  milestones.sort((a, b) => {
+    const at = a.expectedDate?.getTime() ?? a.actualDate?.getTime() ?? 0;
+    const bt = b.expectedDate?.getTime() ?? b.actualDate?.getTime() ?? 0;
+    return at - bt || a.name.localeCompare(b.name);
   });
 
   bars.sort((a, b) => {
@@ -550,6 +687,7 @@ export function buildProgrammeChart(
     windowEnd,
     totalDays,
     bars,
+    milestones,
     ticks: buildTicks(windowStart, windowEnd, totalDays, position),
     todayPct: now >= windowStart && now <= windowEnd ? position(now) : null,
     handoverPct:

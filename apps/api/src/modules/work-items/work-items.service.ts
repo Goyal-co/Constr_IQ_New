@@ -13,6 +13,7 @@ import {
   parseIsoDate,
   todayUtc,
   type BulkDesignDto,
+  type CloseRevisionDto,
   type CommentKind,
   type CreateCommentDto,
   type CreateRevisionDto,
@@ -89,54 +90,58 @@ export class WorkItemsService {
   // -------------------------------------------------------------------------
 
   /**
-   * Issue the next revision of this activity's drawing.
+   * Raise a revision.
+   *
+   * Opening and issuing are separate acts. A revision is raised when somebody
+   * decides the drawing must change; the new sheet lands days or weeks later.
+   * Collapsing the two into one event lost that gap — and the gap is the period
+   * site knows a change is coming and has nothing to build from, which is
+   * exactly what anybody looking at this screen wants to see.
    *
    * The number is assigned here, inside a transaction, rather than sent by the
-   * client: two people clicking "New revision" at the same moment must not both
-   * produce an R3. The unique constraint on (workItemId, revision) is the
-   * backstop if they do.
+   * client: two people clicking at the same moment must not both produce an R3.
+   * The unique index on (owner, revision) is the backstop if they do.
    *
-   * Issuing a revision also marks the drawing as issued — a revision that
-   * existed while the item still read "not issued" would be a contradiction.
+   * Raising does NOT mark the drawing issued. It is being revised, which is the
+   * opposite of ready.
    */
-  async addRevision(
+  async openRevision(
     actor: AuthenticatedUser,
     projectId: string,
     id: string,
     dto: CreateRevisionDto,
     client?: ClientMeta,
-  ): Promise<WorkItem> {
+  ) {
     const project = await this.projects.assertProject(actor.organisationId, projectId);
     const existing = await this.load(projectId, id);
-    const today = todayUtc();
-    const issuedDate = dto.issuedDate === undefined ? today : parseIsoDate(dto.issuedDate);
 
-    const next = await this.prisma.$transaction(async (tx) => {
+    // One at a time. Two open revisions on one drawing would leave "which
+    // revision is site building from" with no answer, which is the question
+    // this whole feature exists to settle.
+    const alreadyOpen = await this.prisma.drawingRevision.findFirst({
+      where: { workItemId: id, status: 'OPEN' },
+    });
+    if (alreadyOpen) {
+      throw new ConflictException(
+        `R${alreadyOpen.revision} is already open on "${existing.name}". Close it before raising another.`,
+      );
+    }
+
+    const revision = await this.prisma.$transaction(async (tx) => {
       const latest = await tx.drawingRevision.findFirst({
         where: { workItemId: id },
         orderBy: { revision: 'desc' },
         select: { revision: true },
       });
-      const revision = (latest?.revision ?? 0) + 1;
+      const next = (latest?.revision ?? 0) + 1;
 
       await tx.drawingRevision.create({
         data: {
           workItemId: id,
-          revision,
+          revision: next,
+          status: 'OPEN',
           notes: dto.notes ?? null,
-          issuedDate,
-          issuedById: actor.id,
-        },
-      });
-
-      await tx.workItem.update({
-        where: { id },
-        data: {
-          currentRevision: revision,
-          designComplete: true,
-          designCompletedAt: new Date(),
-          designedById: actor.id,
-          designCompletedDate: issuedDate ?? today,
+          openedById: actor.id,
         },
       });
 
@@ -146,23 +151,104 @@ export class WorkItemsService {
             workItemId: id,
             authorId: actor.id,
             kind: 'REVISION',
-            body: `R${revision}: ${dto.notes}`,
+            body: `R${next} raised: ${dto.notes}`,
           },
         });
       }
 
-      return revision;
+      return next;
     });
 
     await this.audit.record({
       organisationId: actor.organisationId,
       actorId: actor.id,
-      action: 'workitem.revision.issued',
+      action: 'workitem.revision_opened',
+      entityType: 'WorkItem',
+      entityId: id,
+      entityLabel: `${project.name} · ${existing.name}`,
+      before: { openRevision: null },
+      after: { openRevision: revision, notes: dto.notes ?? null },
+      client,
+    });
+
+    return this.present(actor, projectId, id);
+  }
+
+  /**
+   * Close a revision out — the reissued drawing has landed.
+   *
+   * Only now does the parent count as issued, and only now does
+   * `currentRevision` move: it tracks what site can build from, not what
+   * somebody has started drawing.
+   */
+  async closeRevision(
+    actor: AuthenticatedUser,
+    projectId: string,
+    id: string,
+    revisionId: string,
+    dto: CloseRevisionDto,
+    client?: ClientMeta,
+  ) {
+    const project = await this.projects.assertProject(actor.organisationId, projectId);
+    const existing = await this.load(projectId, id);
+
+    const revision = await this.prisma.drawingRevision.findFirst({
+      where: { id: revisionId, workItemId: id },
+    });
+    if (!revision) {
+      throw new NotFoundException('That revision does not exist on this item.');
+    }
+    if (revision.status === 'ISSUED') {
+      throw new ConflictException(`R${revision.revision} has already been issued.`);
+    }
+
+    const issued = dto.issuedDate === undefined ? todayUtc() : parseIsoDate(dto.issuedDate);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.drawingRevision.update({
+        where: { id: revisionId },
+        data: {
+          status: 'ISSUED',
+          // The check constraint requires a date on an issued revision, and
+          // today is the only sensible fallback if the caller cleared it.
+          issuedDate: issued ?? todayUtc(),
+          issuedById: actor.id,
+          ...(dto.notes ? { notes: dto.notes } : {}),
+        },
+      });
+
+      await tx.workItem.update({
+        where: { id },
+        data: {
+          currentRevision: revision.revision,
+          designComplete: true,
+          designCompletedAt: new Date(),
+          designedById: actor.id,
+          designCompletedDate: issued,
+        },
+      });
+
+      await tx.activityComment.create({
+        data: {
+          workItemId: id,
+          authorId: actor.id,
+          kind: 'REVISION',
+          body: dto.notes
+            ? `R${revision.revision} issued: ${dto.notes}`
+            : `R${revision.revision} issued.`,
+        },
+      });
+    });
+
+    await this.audit.record({
+      organisationId: actor.organisationId,
+      actorId: actor.id,
+      action: 'workitem.revision_issued',
       entityType: 'WorkItem',
       entityId: id,
       entityLabel: `${project.name} · ${existing.name}`,
       before: { currentRevision: existing.currentRevision },
-      after: { currentRevision: next, notes: dto.notes ?? null },
+      after: { currentRevision: revision.revision },
       client,
     });
 
@@ -183,7 +269,10 @@ export class WorkItemsService {
           assignee: true,
           designedBy: true,
           comments: { include: { author: true }, orderBy: { createdAt: 'desc' } },
-          revisions: { include: { issuedBy: true }, orderBy: { revision: 'desc' } },
+          revisions: {
+            include: { issuedBy: true, openedBy: true },
+            orderBy: { revision: 'desc' },
+          },
         },
       }),
       this.materialsFor(projectId),

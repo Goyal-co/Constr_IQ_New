@@ -16,6 +16,7 @@ import {
 } from '@ciq/shared';
 import { ApiRequestError, downloadFile } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useRowExpansion } from '@/lib/useRowExpansion';
 import {
   useBulkDesign,
   useBulkDesignFiles,
@@ -48,6 +49,7 @@ import {
   MenuItem,
   Modal,
   Progress,
+  RowToggle,
   SkeletonRows,
   useToast,
 } from '@/components/ui';
@@ -329,6 +331,7 @@ export function ProjectDetailPage() {
         {hasDatedWork ? (
           <ProgrammeChart
             workItems={project.workItems}
+            designFiles={project.designFiles}
             handoverDate={project.handoverDate}
             locale={settings.locale}
           />
@@ -470,6 +473,7 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
   const [draft, setDraft] = useState('');
 
   /** The drawing whose comments and revisions are open, if any. */
+  const rows = useRowExpansion();
   const [openFile, setOpenFile] = useState<string | null>(null);
   /** The drawing being marked issued, held while its note is written. */
   const [approving, setApproving] = useState<DesignFile | null>(null);
@@ -542,8 +546,8 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
               </thead>
               <tbody>
                 {project.designFiles.map((file) => (
-                  <tr key={file.id}>
-                    <td>
+                  <tr key={file.id} {...rows.rowProps(file.id)}>
+                    <td data-summary>
                       <Checkbox
                         checked={file.isComplete}
                         disabled={!canEdit}
@@ -566,6 +570,16 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
                       >
                         {file.name}
                       </span>
+                      {/* Only while the row is collapsed on mobile — the Rev
+                          column below carries it everywhere else, and showing
+                          both put the same chip on screen twice. */}
+                      <span
+                        className="rev-chip rev-chip--summary"
+                        data-issued={file.currentRevision > 0}
+                      >
+                        {formatRevision(file.currentRevision)}
+                      </span>
+                      <RowToggle expanded={rows.isOpen(file.id)} label={file.name} />
                     </td>
                     <td data-label="Rev">
                       <span className="rev-chip" data-issued={file.currentRevision > 0}>
@@ -762,6 +776,7 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
   const bulk = useBulkDesign(project.id);
   const [draft, setDraft] = useState('');
 
+  const rows = useRowExpansion();
   /** The activity whose comments and revisions are open, if any. */
   const [openItem, setOpenItem] = useState<string | null>(null);
   /** The activity being marked designed, held while its note is written. */
@@ -842,8 +857,8 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
               </thead>
               <tbody>
                 {items.map((item) => (
-                  <tr key={item.id}>
-                    <td>
+                  <tr key={item.id} {...rows.rowProps(item.id)}>
+                    <td data-summary>
                       <Checkbox
                         checked={item.designComplete}
                         disabled={!canEdit}
@@ -858,8 +873,9 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                         }}
                       />
                     </td>
-                    <td data-label="Work item">
+                    <td data-summary data-label="Work item">
                       <span
+                        className="grow truncate"
                         style={{
                           textDecoration: item.designComplete ? 'line-through' : undefined,
                           color: item.designComplete ? 'var(--text-tertiary)' : undefined,
@@ -867,6 +883,7 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                       >
                         {item.name}
                       </span>
+                      <RowToggle expanded={rows.isOpen(item.id)} label={item.name} />
                     </td>
                     <td data-label="Rev">
                       <span className="rev-chip" data-issued={item.currentRevision > 0}>
@@ -1660,6 +1677,7 @@ function ExecutionPhasePanel({
   const toast = useToast();
   const [draft, setDraft] = useState('');
 
+  const rows = useRowExpansion();
   const [openItem, setOpenItem] = useState<string | null>(null);
   /**
    * A status change waiting on its note.
@@ -1778,16 +1796,25 @@ function ExecutionPhasePanel({
                 );
 
                 return (
-                  <tr key={item.id}>
-                    <td data-label="Work item">
-                      <div className="font-medium">{item.name}</div>
-                      {isBlocked && (
-                        <div className="text-2xs" style={{ color: 'var(--danger-text)' }}>
-                          {item.gate.reasons.join(' · ')}
-                          {item.gate.pendingMaterials.length > 0 &&
-                            `: ${item.gate.pendingMaterials.map((m) => m.name).join(', ')}`}
-                        </div>
-                      )}
+                  <tr key={item.id} {...rows.rowProps(item.id)}>
+                    <td data-summary data-label="Work item">
+                      <div className="grow" style={{ minWidth: 0 }}>
+                        <div className="font-medium truncate">{item.name}</div>
+                        {isBlocked && (
+                          <div className="text-2xs" style={{ color: 'var(--danger-text)' }}>
+                            {item.gate.reasons.join(' · ')}
+                            {item.gate.pendingMaterials.length > 0 &&
+                              `: ${item.gate.pendingMaterials.map((m) => m.name).join(', ')}`}
+                          </div>
+                        )}
+                      </div>
+                      {/* Status rides the summary so a collapsed row still says
+                          what the activity is doing — the one thing somebody
+                          scanning the list actually wants. */}
+                      <span className="row-summary-status">
+                        <ActivityStatusBadge status={item.executionStatus} />
+                      </span>
+                      <RowToggle expanded={rows.isOpen(item.id)} label={item.name} />
                     </td>
                     {dateCell('plannedStart', 'Planned start')}
                     {dateCell('plannedEnd', 'Planned end')}

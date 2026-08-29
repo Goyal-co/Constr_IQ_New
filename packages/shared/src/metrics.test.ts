@@ -526,6 +526,79 @@ describe('buildProgrammeChart', () => {
   it('returns null when nothing is dated', () => {
     expect(buildProgrammeChart([], null, TODAY)).toBeNull();
   });
+
+  // --- Drawings -----------------------------------------------------------
+  // A drawing is a point, not a span: it has a due date and an issued date and
+  // no duration between them that anybody entered.
+
+  it('places drawings as milestones', () => {
+    const chart = buildProgrammeChart(items, HANDOVER, TODAY, [
+      { id: 'd1', name: 'GFC set', expected: '2026-02-10', actual: null, isComplete: false },
+    ])!;
+
+    expect(chart.milestones).toHaveLength(1);
+    expect(chart.milestones[0].expectedPct).toBeGreaterThanOrEqual(0);
+    expect(chart.milestones[0].expectedPct).toBeLessThanOrEqual(100);
+    expect(chart.milestones[0].actualPct).toBeNull();
+  });
+
+  it('flags a drawing outstanding past its due date', () => {
+    // Found by name, not by index: milestones come back in due-date order and
+    // these two share a date, so the tie-break by name reverses the input.
+    const milestones = buildProgrammeChart(items, HANDOVER, TODAY, [
+      { id: 'a', name: 'Late', expected: '2026-01-05', actual: null, isComplete: false },
+      { id: 'b', name: 'Fine', expected: '2026-01-05', actual: '2026-01-05', isComplete: true },
+    ])!.milestones;
+    const overdue = milestones.find((m) => m.name === 'Late')!;
+    const ontime = milestones.find((m) => m.name === 'Fine')!;
+
+    expect(overdue.isOverdue).toBe(true);
+    // Issued, so its due date passing is history rather than a problem.
+    expect(ontime.isOverdue).toBe(false);
+    expect(ontime.daysLate).toBeNull();
+  });
+
+  it('measures how late a drawing was issued', () => {
+    const chart = buildProgrammeChart(items, HANDOVER, TODAY, [
+      { id: 'd', name: 'RCP', expected: '2026-02-01', actual: '2026-02-09', isComplete: true },
+    ])!;
+    expect(chart.milestones[0].daysLate).toBe(8);
+  });
+
+  it('draws a timeline for drawings alone, with no dated activities', () => {
+    const chart = buildProgrammeChart([], null, TODAY, [
+      { id: 'd', name: 'Concept', expected: '2026-03-01', actual: null, isComplete: false },
+    ]);
+    // The drawing programme usually exists before any site dates do; refusing
+    // to draw it until an activity has dates would hide the only plan there is.
+    expect(chart).not.toBeNull();
+    expect(chart!.milestones).toHaveLength(1);
+    expect(chart!.bars).toHaveLength(0);
+  });
+
+  it('widens the window to include a drawing outside the activity span', () => {
+    const withDrawing = buildProgrammeChart(items, null, TODAY, [
+      { id: 'd', name: 'Early concept', expected: '2025-11-01', actual: null, isComplete: false },
+    ])!;
+    // Without this the drawing would position off the left edge of the chart.
+    expect(withDrawing.windowStart.getTime()).toBeLessThanOrEqual(new Date('2025-11-01').getTime());
+    expect(withDrawing.milestones[0].expectedPct).toBeGreaterThanOrEqual(0);
+  });
+
+  it('orders drawings by due date, not by name', () => {
+    const chart = buildProgrammeChart(items, null, TODAY, [
+      { id: '1', name: 'Zebra', expected: '2026-01-10', actual: null, isComplete: false },
+      { id: '2', name: 'Alpha', expected: '2026-02-10', actual: null, isComplete: false },
+    ])!;
+    expect(chart.milestones.map((m) => m.name)).toEqual(['Zebra', 'Alpha']);
+  });
+
+  it('ignores drawings with no dates at all', () => {
+    const chart = buildProgrammeChart(items, HANDOVER, TODAY, [
+      { id: 'd', name: 'Undated', expected: null, actual: null, isComplete: false },
+    ])!;
+    expect(chart.milestones).toHaveLength(0);
+  });
 });
 
 describe('buildExecutiveSummary', () => {

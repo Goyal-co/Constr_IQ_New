@@ -163,6 +163,26 @@ export const DESIGN_FILES_LABEL = 'Design';
  * ones are the point: they record why an item was approved or moved, next to
  * the work rather than in an audit screen.
  */
+/**
+ * A revision's life.
+ *
+ * Raised first, issued later. The gap between the two is the period site knows
+ * a change is coming and has nothing to build from, which is precisely what a
+ * single issue event could not express.
+ */
+export const REVISION_STATUSES = ['OPEN', 'ISSUED'] as const;
+export type RevisionStatus = (typeof REVISION_STATUSES)[number];
+
+export const REVISION_STATUS_LABELS: Record<RevisionStatus, string> = {
+  OPEN: 'Open',
+  ISSUED: 'Issued',
+};
+
+export const REVISION_STATUS_TONE: Record<RevisionStatus, Tone> = {
+  OPEN: 'warning',
+  ISSUED: 'success',
+};
+
 export const COMMENT_KINDS = ['NOTE', 'DESIGN_APPROVAL', 'STATUS_CHANGE', 'REVISION'] as const;
 export type CommentKind = (typeof COMMENT_KINDS)[number];
 

@@ -26,6 +26,7 @@ import {
   type ActivityStatus,
   type CommentKind,
   type DesignFile,
+  type RevisionStatus,
   type DrawingRevision,
   type Material,
   type MaterialLink,
@@ -56,7 +57,10 @@ export type DesignFileWithRelations = PrismaDesignFile & {
   completedBy?: PrismaUser | null;
   /** Optional: absent on the list query, present on a project detail. */
   comments?: (PrismaActivityComment & { author?: PrismaUser | null })[];
-  revisions?: (PrismaDrawingRevision & { issuedBy?: PrismaUser | null })[];
+  revisions?: (PrismaDrawingRevision & {
+    issuedBy?: PrismaUser | null;
+    openedBy?: PrismaUser | null;
+  })[];
 };
 
 export type MaterialWithRelations = PrismaMaterial & {
@@ -70,7 +74,10 @@ export type WorkItemWithRelations = PrismaWorkItem & {
   assignee?: PrismaUser | null;
   /** Optional: absent on the list query, present on a project detail. */
   comments?: (PrismaActivityComment & { author?: PrismaUser | null })[];
-  revisions?: (PrismaDrawingRevision & { issuedBy?: PrismaUser | null })[];
+  revisions?: (PrismaDrawingRevision & {
+    issuedBy?: PrismaUser | null;
+    openedBy?: PrismaUser | null;
+  })[];
 };
 
 export type ProjectWithRelations = PrismaProject & {
@@ -211,14 +218,20 @@ export function toActivityComment(
 }
 
 export function toDrawingRevision(
-  row: PrismaDrawingRevision & { issuedBy?: PrismaUser | null },
+  row: PrismaDrawingRevision & {
+    issuedBy?: PrismaUser | null;
+    openedBy?: PrismaUser | null;
+  },
 ): DrawingRevision {
   return {
     id: row.id,
     workItemId: row.workItemId,
     designFileId: row.designFileId,
     revision: row.revision,
+    status: row.status as RevisionStatus,
     notes: row.notes,
+    openedAt: row.openedAt.toISOString(),
+    openedBy: row.openedBy ? toUserSummary(row.openedBy) : null,
     issuedDate: toIsoDate(row.issuedDate),
     issuedBy: row.issuedBy ? toUserSummary(row.issuedBy) : null,
     createdAt: row.createdAt.toISOString(),
@@ -514,7 +527,10 @@ export const PROJECT_DETAIL_INCLUDE = {
     include: {
       completedBy: true,
       comments: { include: { author: true }, orderBy: { createdAt: 'desc' } },
-      revisions: { include: { issuedBy: true }, orderBy: { revision: 'desc' } },
+      revisions: {
+        include: { issuedBy: true, openedBy: true },
+        orderBy: { revision: 'desc' },
+      },
     },
     orderBy: { position: 'asc' },
   },
@@ -524,7 +540,10 @@ export const PROJECT_DETAIL_INCLUDE = {
       assignee: true,
       designedBy: true,
       comments: { include: { author: true }, orderBy: { createdAt: 'desc' } },
-      revisions: { include: { issuedBy: true }, orderBy: { revision: 'desc' } },
+      revisions: {
+        include: { issuedBy: true, openedBy: true },
+        orderBy: { revision: 'desc' },
+      },
     },
     orderBy: [{ phase: { position: 'asc' } }, { position: 'asc' }],
   },

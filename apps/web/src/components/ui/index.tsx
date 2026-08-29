@@ -119,15 +119,26 @@ export function Badge({
   tone = 'neutral',
   dot,
   large,
+  lozenge,
   children,
 }: {
   tone?: Tone;
   dot?: boolean;
   large?: boolean;
+  /**
+   * The compact uppercase form used for machine states — an activity's status,
+   * an order's state. Reads as a state rather than as a word somebody typed,
+   * and a column of them scans as a pattern before any of it is read.
+   */
+  lozenge?: boolean;
   children: ReactNode;
 }) {
   return (
-    <span className={`badge${large ? ' badge-lg' : ''}`} data-tone={tone}>
+    <span
+      className={`badge${large ? ' badge-lg' : ''}`}
+      data-tone={tone}
+      data-lozenge={lozenge || undefined}
+    >
       {dot && <span className="badge-dot" />}
       {children}
     </span>
@@ -707,6 +718,28 @@ export function FilterPills({ label, children }: { label: string; children: Reac
     <div className="filter-pills" role="group" aria-label={label}>
       {children}
     </div>
+  );
+}
+
+/**
+ * The chevron on a collapsible table row.
+ *
+ * Hidden above the stacking breakpoint, where nothing collapses. The row's own
+ * handler does the toggling — this only shows which way it will move — so the
+ * click is stopped here to keep it from counting twice and cancelling itself.
+ */
+export function RowToggle({ expanded, label }: { expanded: boolean; label: string }) {
+  return (
+    <button
+      type="button"
+      className="row-toggle"
+      aria-expanded={expanded}
+      aria-label={`${expanded ? 'Hide' : 'Show'} details for ${label}`}
+      onClick={(event) => event.stopPropagation()}
+      tabIndex={-1}
+    >
+      <IconChevronDown size={16} />
+    </button>
   );
 }
 

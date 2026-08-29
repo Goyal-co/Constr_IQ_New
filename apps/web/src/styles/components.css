@@ -1424,78 +1424,194 @@
 }
 
 /* ==========================================================================
-   Programme (Gantt) chart
+   Programme chart
+   ==========================================================================
+   One bar per activity on one baseline: a light channel for the plan, a solid
+   bar running through it for actual. Slippage is the actual overshooting the
+   end of its channel — a length the eye measures directly, rather than a
+   comparison between two bars at different heights.
+
+   Marks stay thin, grid and axis stay recessive, and the only saturated ink on
+   the surface is the data.
    ========================================================================== */
 
-.gantt {
-  --gantt-label-width: 200px;
-  min-width: 720px;
+.gantt-wrap {
+  --gantt-label-width: 210px;
+  --gantt-row-height: 34px;
+  --gantt-plan-height: 18px;
+  --gantt-actual-height: 10px;
 }
 
-.gantt-axis {
+.gantt {
+  min-width: 640px;
+}
+
+/* --- Axis ------------------------------------------------------------------ */
+
+.gantt-head {
+  display: flex;
+  align-items: flex-end;
+  height: 40px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.gantt-head-label {
+  width: var(--gantt-label-width);
+  flex: 0 0 var(--gantt-label-width);
+  /* Sticky like the row labels, so the axis corner does not slide away and
+     leave tick labels floating over the names. */
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  height: 100%;
+  background: var(--surface-raised);
+}
+
+.gantt-head-track {
   position: relative;
-  height: 22px;
-  margin-left: var(--gantt-label-width);
-  border-bottom: 1px solid var(--border-subtle);
+  flex: 1 1 auto;
+  height: 100%;
 }
 
 .gantt-tick {
   position: absolute;
-  top: 0;
+  bottom: 5px;
   transform: translateX(-50%);
   font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
   white-space: nowrap;
 }
 
-.gantt-rows {
+/* Alternating bands. Following a bar across a wide chart on hairlines alone
+   means counting gridlines; a band gives the eye a region to track instead.
+   Kept far below the marks in weight — it is orientation, not data. */
+.gantt-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--surface-canvas);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Labelled markers, so today and handover do not need a legend lookup on the
+   axis itself. */
+.gantt-flag {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.gantt-flag[data-kind='today'] {
+  background: var(--danger-solid);
+  color: #fff;
+}
+
+.gantt-flag[data-kind='handover'] {
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-text);
+}
+
+/* --- Rows ------------------------------------------------------------------ */
+
+.gantt-body {
+  padding-top: var(--space-1);
+}
+
+.gantt-group + .gantt-group {
+  margin-top: var(--space-2);
+}
+
+/* Grouping the rows under their phase turns a flat list of activities into the
+   two or three packages of work a project actually has. */
+.gantt-group-head {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  position: sticky;
+  left: 0;
+  width: max-content;
+  padding: var(--space-2) 0 var(--space-1);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.gantt-group-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
 }
 
 .gantt-row {
   display: flex;
   align-items: center;
-  min-height: 34px;
-  border-bottom: 1px solid var(--border-subtle);
+  height: var(--gantt-row-height);
+  border-radius: var(--radius-sm);
 }
 
-.gantt-row:hover {
+.gantt-row:hover,
+.gantt-row:focus-visible {
   background: var(--surface-hover);
+  outline: none;
 }
 
+.gantt-row:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+/* Sticky, so activity names stay readable while the programme scrolls under
+   them. Opaque for the same reason — bars must not show through the name. */
 .gantt-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  position: sticky;
+  left: 0;
+  z-index: 3;
   width: var(--gantt-label-width);
   flex: 0 0 var(--gantt-label-width);
-  padding-right: var(--space-3);
+  height: 100%;
+  padding-right: var(--space-4);
+  background: var(--surface-raised);
   font-size: var(--text-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.gantt-row:hover .gantt-label,
+.gantt-row:focus-visible .gantt-label {
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 .gantt-track {
   position: relative;
   flex: 1 1 auto;
-  height: 34px;
+  height: 100%;
 }
 
-.gantt-grid {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--border-subtle);
-}
+/* --- Markers --------------------------------------------------------------- */
 
 .gantt-today {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 2px;
+  margin-left: -1px;
   background: var(--danger-solid);
-  opacity: 0.6;
+  opacity: 0.5;
   z-index: 3;
+  pointer-events: none;
 }
 
 .gantt-handover {
@@ -1504,55 +1620,307 @@
   bottom: 0;
   width: 0;
   border-left: 2px dashed var(--accent-solid);
-  opacity: 0.7;
+  opacity: 0.55;
   z-index: 3;
+  pointer-events: none;
 }
 
-/* Planned sits behind as an outline; actual is solid on top. Reading the two
-   together is what makes slippage legible at a glance. */
+/* --- Bars ------------------------------------------------------------------
+   Rounded ends, capped thickness, and no border: separation comes from the
+   channel's own tint against the surface, not from a stroke that would add
+   ink the data did not ask for. */
+
 .gantt-planned {
   position: absolute;
-  top: 8px;
-  height: 8px;
+  top: calc((var(--gantt-row-height) - var(--gantt-plan-height)) / 2);
+  height: var(--gantt-plan-height);
+  min-width: 3px;
   border-radius: var(--radius-xs);
   background: var(--bar-colour, var(--neutral-solid));
-  opacity: 0.28;
+  opacity: 0.18;
   z-index: 1;
+  pointer-events: none;
+}
+
+/* The planned end, as a hairline the actual bar visibly crosses or falls short
+   of. Sits above the bar rather than under it — the whole job of this mark is
+   to stay readable exactly where a bar covers it. */
+.gantt-plan-end {
+  position: absolute;
+  top: calc((var(--gantt-row-height) - var(--gantt-plan-height)) / 2 - 2px);
+  height: calc(var(--gantt-plan-height) + 4px);
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--bar-colour, var(--neutral-solid));
+  opacity: 0.85;
+  z-index: 2;
+  pointer-events: none;
 }
 
 .gantt-actual {
   position: absolute;
-  top: 18px;
-  height: 8px;
+  top: calc((var(--gantt-row-height) - var(--gantt-actual-height)) / 2);
+  height: var(--gantt-actual-height);
+  min-width: 3px;
   border-radius: var(--radius-xs);
   background: var(--bar-colour, var(--neutral-solid));
   z-index: 2;
+  pointer-events: none;
+  transition: filter var(--duration-fast) var(--ease-out);
 }
 
-.gantt-actual[data-late='true'] {
+.gantt-row:hover .gantt-actual {
+  filter: brightness(1.08);
+}
+
+/* Hatched rather than simply recoloured: the bar keeps its phase hue, so it is
+   still identifiable as Civil or Finishing while reading as a problem.
+
+   Coarser than the obvious 3px/4px, which at bar height moires into a solid
+   orange smear and loses both the hue and the sense of stripes. */
+.gantt-actual[data-flagged='true'] {
   background: repeating-linear-gradient(
-    45deg,
-    var(--danger-solid),
-    var(--danger-solid) 4px,
-    color-mix(in srgb, var(--danger-solid) 70%, #fff) 4px,
-    color-mix(in srgb, var(--danger-solid) 70%, #fff) 8px
+    135deg,
+    var(--bar-colour, var(--neutral-solid)),
+    var(--bar-colour, var(--neutral-solid)) 5px,
+    var(--danger-solid) 5px,
+    var(--danger-solid) 10px
   );
 }
+
+/* Work in progress has no end date, so its bar is given no hard end — it fades
+   out. A square end sitting on today's line reads as "finished today", which is
+   the opposite of what an open activity means. */
+.gantt-actual[data-running='true'] {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
+}
+
+/* --- Drawings, as milestones ------------------------------------------------
+   A drawing has a due date and an issued date and no duration between them, so
+   it is a point. A diamond rather than a dot because it must not be mistaken
+   for the round end of a bar — the two mean different things and sit on the
+   same rows.
+
+   Hollow = due but not issued. Filled = issued. Where a drawing was issued late
+   both appear, joined by a connector whose length is the slip. */
+
+.gantt-diamond {
+  position: absolute;
+  top: calc(var(--gantt-row-height) / 2 - 5px);
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  transform: rotate(45deg);
+  border-radius: 1px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.gantt-diamond[data-kind='expected'] {
+  /* Hollow: a date something is due at, not a thing that has happened. */
+  background: var(--surface-raised);
+  border: 2px solid var(--text-tertiary);
+}
+
+.gantt-diamond[data-kind='expected'][data-overdue='true'] {
+  border-color: var(--danger-solid);
+}
+
+.gantt-diamond[data-kind='actual'] {
+  background: var(--success-solid);
+  /* A ring in the surface colour, so it stays legible where it overlaps the
+     hollow diamond on a drawing issued exactly on time. */
+  box-shadow: 0 0 0 2px var(--surface-raised);
+}
+
+.gantt-diamond[data-kind='actual'][data-late='true'] {
+  background: var(--danger-solid);
+}
+
+/* The slip, at the same scale as everything else on the row — a tooltip states
+   the number, this shows the distance. */
+.gantt-slip {
+  position: absolute;
+  top: calc(var(--gantt-row-height) / 2 - 1px);
+  height: 2px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--danger-solid),
+    var(--danger-solid) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+  opacity: 0.75;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Stands for the pair in the group header and the legend. */
+.gantt-milestone-key {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  transform: rotate(45deg);
+  border-radius: 1px;
+  background: var(--success-solid);
+}
+
+/* --- Legend ---------------------------------------------------------------- */
 
 .gantt-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-4);
+  align-items: center;
+  gap: var(--space-3) var(--space-5);
   margin-top: var(--space-4);
   padding-top: var(--space-3);
   border-top: 1px solid var(--border-subtle);
+}
+
+.gantt-legend-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
   font-size: var(--text-xs);
   color: var(--text-secondary);
 }
 
-/* ==========================================================================
-   Checklist rows
-   ========================================================================== */
+.gantt-legend-group > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Encoding keys are separated from the phase identities by a rule, because they
+   answer a different question — not "whose bar is this" but "what does this
+   shape mean". */
+.gantt-legend-group[data-encoding='true'] {
+  padding-left: var(--space-5);
+  border-left: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+}
+
+/* Each key mirrors the mark it stands for, at the mark's own proportions. */
+.gantt-legend-key,
+.legend-key {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 2px;
+}
+
+.legend-key--planned {
+  width: 16px;
+  height: 9px;
+  background: var(--text-secondary);
+  opacity: 0.22;
+}
+
+.legend-key--actual {
+  width: 16px;
+  height: 6px;
+  background: var(--text-secondary);
+}
+
+.legend-key--late {
+  width: 16px;
+  height: 6px;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--text-secondary),
+    var(--text-secondary) 5px,
+    var(--danger-solid) 5px,
+    var(--danger-solid) 10px
+  );
+}
+
+.legend-key--planend {
+  width: 2px;
+  height: 12px;
+  background: var(--text-secondary);
+  border-radius: 1px;
+}
+
+.legend-key--today {
+  width: 2px;
+  height: 12px;
+  background: var(--danger-solid);
+  border-radius: 0;
+}
+
+.legend-key--handover {
+  width: 0;
+  height: 12px;
+  border-left: 2px dashed var(--accent-solid);
+  border-radius: 0;
+}
+
+/* --- Tooltip ---------------------------------------------------------------
+   Fixed-position, because the chart scrolls inside its own box and an
+   absolutely positioned tooltip would be clipped by that overflow at exactly
+   the right-hand rows a reader scrolls to reach. */
+
+.gantt-tip {
+  position: fixed;
+  z-index: var(--z-toast);
+  max-width: 246px;
+  padding: var(--space-3);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  animation: fade-in var(--duration-fast) var(--ease-out);
+}
+
+.gantt-tip-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+/* Value first in weight, label second — the reader already knows which row
+   they are pointing at and wants the dates. */
+.gantt-tip-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px var(--space-3);
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.gantt-tip-rows dt {
+  color: var(--text-tertiary);
+}
+
+.gantt-tip-rows dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.gantt-tip-flag {
+  margin-top: var(--space-2);
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.gantt-tip-flag[data-tone='success'] {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
 
 .checklist {
   display: flex;
@@ -2229,4 +2597,84 @@ tr:hover .row-action,
   min-width: 30px;
   padding: 0 6px;
   gap: 2px;
+}
+
+/* ==========================================================================
+   Status lozenges
+   ==========================================================================
+   The Atlassian convention: uppercase, letter-spaced, small and bold, in a
+   tinted pill. It reads as a *state* rather than as a word someone typed,
+   which is exactly what it is — and at this size the shape is recognisable
+   before the text is, so a column of them scans as a pattern.
+
+   Applied to activity and procurement status only. Project status keeps its
+   sentence-case badge: it sits in a heading beside the project name, where
+   shouting would compete with the name itself.
+   ========================================================================== */
+
+.badge[data-lozenge='true'] {
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+/* The status a collapsed mobile row keeps, so the row still says what the
+   activity is doing without being opened. */
+.row-summary-status {
+  flex: 0 0 auto;
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .row-summary-status {
+    display: inline-flex;
+  }
+
+  /* The full status cell is redundant once the summary carries it. */
+  .table-stack tr[data-collapsible='true'] td[data-label='Planned end'] {
+    display: none;
+  }
+}
+
+/* An open revision, called out above the history.
+   While one is open the item is under revision — not issued — and the only
+   action that makes sense is closing it out. */
+.rev-open-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-md);
+  background: var(--warning-bg);
+  font-size: var(--text-sm);
+  color: var(--warning-text);
+}
+
+/* A revision chip that is raised but not issued reads as pending rather than
+   as the revision in force — those are different claims. */
+.rev-chip[data-issued='false'] {
+  border-style: dashed;
+}
+
+/* The drawing markers on an activity's own row.
+   Smaller than a standalone drawing's, because here they are one phase of a
+   row whose main subject is the build — same encoding, lower weight. */
+.gantt-diamond--sm {
+  top: calc(var(--gantt-row-height) / 2 - 4px);
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+}
+
+.gantt-diamond--sm[data-kind='expected'] {
+  border-width: 1.5px;
 }

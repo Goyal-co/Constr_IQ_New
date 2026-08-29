@@ -351,16 +351,30 @@ export const createCommentSchema = z.object({
 export type CreateCommentDto = z.infer<typeof createCommentSchema>;
 
 /**
- * Issue a new drawing revision.
+ * Raise a revision.
  *
- * The revision number is assigned by the server, not sent by the client: two
- * people clicking "New revision" at once must not both produce an R3.
+ * The number is assigned by the server, not sent by the client: two people
+ * clicking "New revision" at once must not both produce an R3.
+ *
+ * No issue date here — the revision is not issued yet. That is what closing it
+ * is for.
  */
 export const createRevisionSchema = z.object({
   notes: z.string().trim().max(2000).optional(),
-  issuedDate: nullableIsoDate,
 });
 export type CreateRevisionDto = z.infer<typeof createRevisionSchema>;
+
+/**
+ * Close a revision out — the drawing has been reissued.
+ *
+ * The date is accepted so a sheet issued last week keeps its real date rather
+ * than the date somebody got round to ticking it.
+ */
+export const closeRevisionSchema = z.object({
+  issuedDate: nullableIsoDate,
+  notes: z.string().trim().max(2000).optional(),
+});
+export type CloseRevisionDto = z.infer<typeof closeRevisionSchema>;
 
 /** Tick or untick the design track for a whole phase at once. */
 export const bulkDesignSchema = z.object({

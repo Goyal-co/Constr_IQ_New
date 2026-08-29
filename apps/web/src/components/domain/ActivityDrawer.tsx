@@ -3,6 +3,8 @@ import {
   ACTIVITY_STATUS_LABELS,
   COMMENT_KIND_LABELS,
   COMMENT_KIND_TONE,
+  REVISION_STATUS_LABELS,
+  REVISION_STATUS_TONE,
   formatRevision,
   type ActivityComment,
   type DesignFile,
@@ -14,8 +16,10 @@ import { useAuth } from '@/lib/auth';
 import {
   useAddComment,
   useAddDesignFileComment,
-  useAddDesignFileRevision,
-  useAddRevision,
+  useCloseDesignFileRevision,
+  useCloseRevision,
+  useOpenDesignFileRevision,
+  useOpenRevision,
 } from '@/lib/queries';
 import { formatIso, formatTimestamp } from '@/lib/format';
 import { Avatar, Badge, Button, Modal, useToast } from '@/components/ui';
@@ -88,19 +92,26 @@ export function ActivityDrawer({
   // Both pairs are created unconditionally — hooks cannot be called
   // conditionally — and only the matching pair is used.
   const commentWorkItem = useAddComment(projectId);
-  const reviseWorkItem = useAddRevision(projectId);
+  const openWorkItemRevision = useOpenRevision(projectId);
+  const closeWorkItemRevision = useCloseRevision(projectId);
   const commentDrawing = useAddDesignFileComment(projectId);
-  const reviseDrawing = useAddDesignFileRevision(projectId);
+  const openDrawingRevision = useOpenDesignFileRevision(projectId);
+  const closeDrawingRevision = useCloseDesignFileRevision(projectId);
 
   const isWorkItem = subject.kind === 'workItem';
   const addComment = isWorkItem ? commentWorkItem : commentDrawing;
-  const addRevision = isWorkItem ? reviseWorkItem : reviseDrawing;
+  const openRevision = isWorkItem ? openWorkItemRevision : openDrawingRevision;
+  const closeRevision = isWorkItem ? closeWorkItemRevision : closeDrawingRevision;
 
   const item = normalise(subject);
+  /** At most one, enforced server-side. */
+  const openRev = item.revisions.find((rev) => rev.status === 'OPEN') ?? null;
 
   const [draft, setDraft] = useState('');
   const [revising, setRevising] = useState(false);
   const [revNotes, setRevNotes] = useState('');
+  const [closing, setClosing] = useState(false);
+  const [issuedDate, setIssuedDate] = useState('');
 
   const canComment = can('activity:update');
   const canRevise = can('drawing:update');
@@ -122,23 +133,47 @@ export function ActivityDrawer({
             <IconDrawing size={11} />
             {formatRevision(item.currentRevision)}
           </span>
-          <Badge tone={item.issued ? 'success' : 'neutral'}>
-            {item.issued ? 'Issued' : 'Not issued'}
+          <Badge tone={openRev ? 'warning' : item.issued ? 'success' : 'neutral'} lozenge>
+            {openRev ? 'Under revision' : item.issued ? 'Issued' : 'Not issued'}
           </Badge>
         </span>
       }
     >
-      {/* --- Revisions ------------------------------------------------------ */}
+      {/* --- Revisions ------------------------------------------------------
+          Raised, then closed. A revision cannot be issued in one act: the
+          drawing is decided to need changing at one moment and the new sheet
+          lands at another, and the gap between them is when site knows a change
+          is coming and has nothing to build from. */}
       <section>
         <div className="row-between" style={{ marginBottom: 'var(--space-3)' }}>
           <span className="eyebrow">Revisions</span>
-          {canRevise && !revising && (
+          {canRevise && !revising && !openRev && (
             <Button size="sm" onClick={() => setRevising(true)}>
               <IconPlus size={13} />
-              New revision
+              Raise revision
             </Button>
           )}
         </div>
+
+        {/* Raising is blocked while one is open — two open revisions would
+            leave "which revision is site building from" unanswerable. */}
+        {openRev && !closing && (
+          <div className="rev-open-callout">
+            <div>
+              <strong>{formatRevision(openRev.revision)} is open.</strong>{' '}
+              <span className="text-secondary">
+                Raised {formatTimestamp(openRev.openedAt, settings.locale)}
+                {openRev.openedBy && ` by ${openRev.openedBy.name}`}.
+              </span>
+            </div>
+            {canRevise && (
+              <Button size="sm" variant="primary" onClick={() => setClosing(true)}>
+                <IconCheck size={13} />
+                Close &amp; issue
+              </Button>
+            )}
+          </div>
+        )}
 
         {revising && (
           <form
@@ -146,18 +181,20 @@ export function ActivityDrawer({
             style={{ marginBottom: 'var(--space-4)' }}
             onSubmit={(event) => {
               event.preventDefault();
-              addRevision.mutate(
+              openRevision.mutate(
                 { id: item.id, notes: revNotes.trim() || undefined },
                 {
-                  onSuccess: (updated) => {
+                  onSuccess: () => {
                     setRevising(false);
                     setRevNotes('');
-                    const rev = formatRevision(updated.currentRevision);
-                    toast.success(`${rev} issued`, `${item.name} is now at ${rev}.`);
+                    toast.success(
+                      'Revision raised',
+                      `${item.name} is being revised. Close it out when the new drawing lands.`,
+                    );
                   },
                   onError: (error) =>
                     toast.error(
-                      'Could not issue the revision',
+                      'Could not raise the revision',
                       error instanceof ApiRequestError ? error.message : undefined,
                     ),
                 },
@@ -165,45 +202,107 @@ export function ActivityDrawer({
             }}
           >
             <label className="visually-hidden" htmlFor="rev-notes">
-              What changed in this revision
+              What is changing in this revision
             </label>
             <textarea
               id="rev-notes"
               className="textarea"
               rows={3}
               autoFocus
-              placeholder="What changed? e.g. door opening moved 300mm, RCP coordinated with HVAC"
+              placeholder="What is changing? e.g. door opening moved 300mm, RCP to be coordinated with HVAC"
               value={revNotes}
               onChange={(event) => setRevNotes(event.target.value)}
             />
             <div className="row gap-2">
-              <Button type="submit" variant="primary" size="sm" loading={addRevision.isPending}>
-                Issue {formatRevision(item.currentRevision + 1)}
+              <Button type="submit" variant="primary" size="sm" loading={openRevision.isPending}>
+                Raise {formatRevision(item.currentRevision + 1)}
               </Button>
               <Button size="sm" type="button" onClick={() => setRevising(false)}>
                 Cancel
               </Button>
             </div>
             <p className="text-2xs text-tertiary">
-              Issuing a revision also marks this as issued — a revision that existed while the item
-              still read &ldquo;not issued&rdquo; would contradict itself.
+              Raising does not issue anything — this item stays un-issued until the revision is
+              closed out.
             </p>
           </form>
         )}
 
+        {closing && openRev && (
+          <form
+            className="stack gap-2"
+            style={{ marginBottom: 'var(--space-4)' }}
+            onSubmit={(event) => {
+              event.preventDefault();
+              closeRevision.mutate(
+                { id: item.id, revisionId: openRev.id, issuedDate: issuedDate || null },
+                {
+                  onSuccess: (updated) => {
+                    setClosing(false);
+                    setIssuedDate('');
+                    const rev = formatRevision(updated.currentRevision);
+                    toast.success(`${rev} issued`, `${item.name} is now at ${rev}.`);
+                  },
+                  onError: (error) =>
+                    toast.error(
+                      'Could not close the revision',
+                      error instanceof ApiRequestError ? error.message : undefined,
+                    ),
+                },
+              );
+            }}
+          >
+            <div className="field">
+              <label className="label" htmlFor="rev-issued">
+                Issued on
+              </label>
+              <input
+                id="rev-issued"
+                className="input"
+                type="date"
+                autoFocus
+                value={issuedDate}
+                onChange={(event) => setIssuedDate(event.target.value)}
+              />
+              <p className="text-2xs text-tertiary">
+                Leave blank for today. A sheet issued last week keeps its real date.
+              </p>
+            </div>
+            <div className="row gap-2">
+              <Button type="submit" variant="primary" size="sm" loading={closeRevision.isPending}>
+                <IconCheck size={13} />
+                Issue {formatRevision(openRev.revision)}
+              </Button>
+              <Button size="sm" type="button" onClick={() => setClosing(false)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        )}
+
         {item.revisions.length === 0 ? (
-          <p className="comment-empty">No revisions issued yet. The first one becomes R1.</p>
+          <p className="comment-empty">No revisions yet. The first one raised becomes R1.</p>
         ) : (
           <ul className="rev-list">
             {item.revisions.map((rev) => (
               <li key={rev.id}>
-                <span className="rev-chip" data-issued="true">
+                <span className="rev-chip" data-issued={rev.status === 'ISSUED'}>
                   {formatRevision(rev.revision)}
                 </span>
                 <div style={{ minWidth: 0 }}>
-                  <div className="text-2xs text-tertiary">
-                    {formatIso(rev.issuedDate, settings.locale)}
-                    {rev.issuedBy && ` · ${rev.issuedBy.name}`}
+                  <div className="row gap-2 wrap" style={{ marginBottom: 2 }}>
+                    <Badge tone={REVISION_STATUS_TONE[rev.status]} lozenge>
+                      {REVISION_STATUS_LABELS[rev.status]}
+                    </Badge>
+                    <span className="text-2xs text-tertiary">
+                      {rev.status === 'ISSUED'
+                        ? `Issued ${formatIso(rev.issuedDate, settings.locale)}${
+                            rev.issuedBy ? ` · ${rev.issuedBy.name}` : ''
+                          }`
+                        : `Raised ${formatTimestamp(rev.openedAt, settings.locale)}${
+                            rev.openedBy ? ` · ${rev.openedBy.name}` : ''
+                          }`}
+                    </span>
                   </div>
                   {rev.notes && <p className="comment-text">{rev.notes}</p>}
                 </div>

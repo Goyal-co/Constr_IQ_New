@@ -4,11 +4,13 @@ import { z } from 'zod';
 import {
   createCommentSchema,
   createDesignFileSchema,
+  closeRevisionSchema,
   createRevisionSchema,
   reorderSchema,
   updateDesignFileSchema,
   type CreateCommentDto,
   type CreateDesignFileDto,
+  type CloseRevisionDto,
   type CreateRevisionDto,
   type ReorderDto,
   type UpdateDesignFileDto,
@@ -80,16 +82,32 @@ export class DesignFilesController {
   @Post(':id/revisions')
   @RequirePermissions('drawing:update')
   @ApiOperation({
-    summary: 'Issue the next revision — the number is assigned server-side',
+    summary: 'Raise a revision — opens it, does not issue it',
   })
-  addRevision(
+  openRevision(
     @CurrentUser() actor: AuthenticatedUser,
     @Param('projectId', ParseUUIDPipe) projectId: string,
     @Param('id', ParseUUIDPipe) id: string,
     @Body(zodBody(createRevisionSchema)) dto: CreateRevisionDto,
     @ClientInfo() client: ClientMeta,
   ) {
-    return this.designFiles.addRevision(actor, projectId, id, dto, client);
+    return this.designFiles.openRevision(actor, projectId, id, dto, client);
+  }
+
+  @Patch(':id/revisions/:revisionId/close')
+  @RequirePermissions('drawing:update')
+  @ApiOperation({
+    summary: 'Close a revision out — the reissued drawing has landed',
+  })
+  closeRevision(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Body(zodBody(closeRevisionSchema)) dto: CloseRevisionDto,
+    @ClientInfo() client: ClientMeta,
+  ) {
+    return this.designFiles.closeRevision(actor, projectId, id, revisionId, dto, client);
   }
 
   @Patch(':id')

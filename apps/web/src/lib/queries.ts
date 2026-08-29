@@ -296,11 +296,22 @@ export const useAddDesignFileComment = (projectId: string) =>
     projectId,
   );
 
-/** Issue the next revision of a drawing. The number is assigned server-side. */
-export const useAddDesignFileRevision = (projectId: string) =>
+/** Raises a revision on a drawing. Nothing is issued until it is closed. */
+export const useOpenDesignFileRevision = (projectId: string) =>
   useProjectMutation(
-    ({ id, ...dto }: { id: string; notes?: string; issuedDate?: string | null }) =>
+    ({ id, ...dto }: { id: string; notes?: string }) =>
       api.post<DesignFile>(`/projects/${projectId}/design-files/${id}/revisions`, dto),
+    projectId,
+  );
+
+/** Closes a drawing's revision out. */
+export const useCloseDesignFileRevision = (projectId: string) =>
+  useProjectMutation(
+    ({ id, revisionId, ...dto }: { id: string; revisionId: string; issuedDate?: string | null }) =>
+      api.patch<DesignFile>(
+        `/projects/${projectId}/design-files/${id}/revisions/${revisionId}/close`,
+        dto,
+      ),
     projectId,
   );
 
@@ -342,11 +353,22 @@ export const useAddComment = (projectId: string) =>
     projectId,
   );
 
-/** Issues the next revision. The number is assigned by the server. */
-export const useAddRevision = (projectId: string) =>
+/** Raises a revision. The number is assigned by the server; nothing is issued. */
+export const useOpenRevision = (projectId: string) =>
   useProjectMutation(
-    ({ id, ...dto }: { id: string; notes?: string; issuedDate?: string | null }) =>
+    ({ id, ...dto }: { id: string; notes?: string }) =>
       api.post<WorkItem>(`/projects/${projectId}/work-items/${id}/revisions`, dto),
+    projectId,
+  );
+
+/** Closes a revision out — the reissued drawing has landed. */
+export const useCloseRevision = (projectId: string) =>
+  useProjectMutation(
+    ({ id, revisionId, ...dto }: { id: string; revisionId: string; issuedDate?: string | null }) =>
+      api.patch<WorkItem>(
+        `/projects/${projectId}/work-items/${id}/revisions/${revisionId}/close`,
+        dto,
+      ),
     projectId,
   );
 

@@ -41,11 +41,19 @@ export function ProjectStatusBadge({ status }: { status: ProjectStatus }) {
 }
 
 export function ActivityStatusBadge({ status }: { status: ActivityStatus }) {
-  return <Badge tone={ACTIVITY_STATUS_TONE[status]}>{ACTIVITY_STATUS_LABELS[status]}</Badge>;
+  return (
+    <Badge tone={ACTIVITY_STATUS_TONE[status]} lozenge>
+      {ACTIVITY_STATUS_LABELS[status]}
+    </Badge>
+  );
 }
 
 export function ProcurementBadge({ state }: { state: ProcurementState }) {
-  return <Badge tone={PROCUREMENT_STATE_TONE[state]}>{PROCUREMENT_STATE_LABELS[state]}</Badge>;
+  return (
+    <Badge tone={PROCUREMENT_STATE_TONE[state]} lozenge>
+      {PROCUREMENT_STATE_LABELS[state]}
+    </Badge>
+  );
 }
 
 export function MaterialStatusLabel({ status }: { status: MaterialStatus }) {

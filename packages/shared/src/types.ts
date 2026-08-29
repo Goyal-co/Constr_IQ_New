@@ -12,6 +12,7 @@ import type {
   ActivityStatus,
   CommentKind,
   MaterialStatus,
+  RevisionStatus,
   ProcurementState,
   ProjectStatus,
   TemplateItemKind,
@@ -189,7 +190,12 @@ export interface DrawingRevision {
   designFileId: string | null;
   /** 1-based. Displayed as R1, R2, R3 — see `formatRevision`. */
   revision: number;
+  status: RevisionStatus;
   notes: string | null;
+  /** When it was raised. */
+  openedAt: string;
+  openedBy: UserSummary | null;
+  /** Null until the revision is closed out. */
   issuedDate: IsoDate | null;
   issuedBy: UserSummary | null;
   createdAt: string;
