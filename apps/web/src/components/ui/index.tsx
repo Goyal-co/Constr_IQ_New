@@ -312,11 +312,14 @@ export function Checkbox({
   onChange,
   label,
   disabled,
+  title,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   label: string;
   disabled?: boolean;
+  /** Why it is disabled, when it is. A disabled control with no reason is a dead end. */
+  title?: string;
 }) {
   return (
     <button
@@ -326,6 +329,7 @@ export function Checkbox({
       aria-label={label}
       className="checkbox"
       disabled={disabled}
+      title={title}
       onClick={() => onChange(!checked)}
     >
       {checked && <IconCheck size={12} strokeWidth={3} />}
@@ -379,11 +383,27 @@ export function Modal({
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
-  // Escape closes, and focus moves into the dialog on open so a keyboard user is
-  // not left behind on the page underneath.
+  /**
+   * `onClose` behind a ref, so the effect below can depend on nothing.
+   *
+   * Callers pass an inline arrow — `onClose={() => setThing(null)}` — which is a
+   * new function on every render. With `onClose` as a dependency the effect tore
+   * down and re-ran on *every keystroke* in the dialog: the cleanup restored
+   * focus to whatever was focused before the dialog opened, and the re-run then
+   * focused the dialog's first field. The result was that you could type one
+   * character and then had to click back into the box. This affected every
+   * modal in the app, not one form.
+   */
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Mount and unmount only. Escape closes, and focus moves into the dialog on
+  // open so a keyboard user is not left behind on the page underneath.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('keydown', onKeyDown);
 
@@ -403,7 +423,7 @@ export function Modal({
       document.body.style.overflow = previousOverflow;
       previouslyFocused?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return createPortal(
     <div

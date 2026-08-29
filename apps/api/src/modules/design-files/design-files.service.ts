@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  formatDate,
   parseIsoDate,
   todayUtc,
   type CloseRevisionDto,
@@ -48,6 +49,29 @@ export class DesignFilesService {
       },
     });
     return toDesignFile(file as DesignFileWithRelations);
+  }
+
+  /**
+   * Refuses to mark something issued while a revision is open on it.
+   *
+   * Un-issuing at the moment a revision is raised is not enough on its own: the
+   * checkbox is still there, and so is "mark all issued". Without this an item
+   * could sit issued and under revision at the same time — which is the exact
+   * contradiction the open/close lifecycle exists to prevent, and it would put
+   * a superseded drawing back in front of site.
+   *
+   * Closing the revision is the only route to issued.
+   */
+  private async assertNoOpenRevision(designFileId: string, name: string) {
+    const open = await this.prisma.drawingRevision.findFirst({
+      where: { designFileId, status: 'OPEN' },
+      select: { revision: true },
+    });
+    if (open) {
+      throw new ConflictException(
+        `"${name}" is under revision — R${open.revision} is open. Close that revision to issue it.`,
+      );
+    }
   }
 
   private async assertFile(projectId: string, id: string) {
@@ -114,6 +138,8 @@ export class DesignFilesService {
       );
     }
 
+    const raisedOn = todayUtc();
+
     const revision = await this.prisma.$transaction(async (tx) => {
       const latest = await tx.drawingRevision.findFirst({
         where: { designFileId: id },
@@ -132,16 +158,39 @@ export class DesignFilesService {
         },
       });
 
-      if (dto.notes) {
-        await tx.activityComment.create({
-          data: {
-            designFileId: id,
-            authorId: actor.id,
-            kind: 'REVISION',
-            body: `R${next} raised: ${dto.notes}`,
-          },
-        });
-      }
+      // Raising a revision un-issues the item.
+      //
+      // The drawing on site is now known to be wrong, so the honest state is
+      // "not issued" until the replacement lands — and because the execution
+      // gate keys off exactly this flag, site work on it stops too. That is the
+      // point: building to a superseded drawing is the failure this whole
+      // section exists to prevent.
+      //
+      // The old issue date goes with it. It survives on the revision that
+      // carried it, which is where the history belongs.
+      await tx.designFile.update({
+        where: { id },
+        data: {
+          isComplete: false,
+          completedAt: null,
+          completedById: null,
+          completedDate: null,
+        },
+      });
+
+      // Logged whether or not a reason was given: the thread is the record of
+      // when this drawing went out of service, and a revision raised silently
+      // would leave that gap unexplained.
+      await tx.activityComment.create({
+        data: {
+          designFileId: id,
+          authorId: actor.id,
+          kind: 'REVISION',
+          body: dto.notes
+            ? `R${next} opened ${formatDate(raisedOn)} — ${dto.notes}`
+            : `R${next} opened ${formatDate(raisedOn)}.`,
+        },
+      });
 
       return next;
     });
@@ -190,15 +239,16 @@ export class DesignFilesService {
     }
 
     const issued = dto.issuedDate === undefined ? todayUtc() : parseIsoDate(dto.issuedDate);
+    // The check constraint requires a date on an issued revision, and today is
+    // the only sensible fallback if the caller cleared it.
+    const issuedOn = issued ?? todayUtc();
 
     await this.prisma.$transaction(async (tx) => {
       await tx.drawingRevision.update({
         where: { id: revisionId },
         data: {
           status: 'ISSUED',
-          // The check constraint requires a date on an issued revision, and
-          // today is the only sensible fallback if the caller cleared it.
-          issuedDate: issued ?? todayUtc(),
+          issuedDate: issuedOn,
           issuedById: actor.id,
           ...(dto.notes ? { notes: dto.notes } : {}),
         },
@@ -211,18 +261,21 @@ export class DesignFilesService {
           isComplete: true,
           completedAt: new Date(),
           completedById: actor.id,
-          completedDate: issued,
+          completedDate: issuedOn,
         },
       });
 
+      // The issue date, not today's: a sheet issued last week and recorded now
+      // must read as issued last week, and the comment is where somebody looks
+      // for that rather than the audit log.
       await tx.activityComment.create({
         data: {
           designFileId: id,
           authorId: actor.id,
           kind: 'REVISION',
           body: dto.notes
-            ? `R${revision.revision} issued: ${dto.notes}`
-            : `R${revision.revision} issued.`,
+            ? `R${revision.revision} closed ${formatDate(issuedOn)} — ${dto.notes}`
+            : `R${revision.revision} closed ${formatDate(issuedOn)}.`,
         },
       });
     });
@@ -299,6 +352,7 @@ export class DesignFilesService {
     if (!existing) throw new NotFoundException('That design file does not exist on this project.');
 
     const becameComplete = dto.isComplete === true && !existing.isComplete;
+    if (becameComplete) await this.assertNoOpenRevision(id, existing.name);
     const becameIncomplete = dto.isComplete === false && existing.isComplete;
 
     const file = await this.prisma.designFile.update({
@@ -385,7 +439,16 @@ export class DesignFilesService {
     const project = await this.projects.assertProject(actor.organisationId, projectId);
 
     const { count } = await this.prisma.designFile.updateMany({
-      where: { projectId, isComplete: !isComplete },
+      where: {
+        projectId,
+        isComplete: !isComplete,
+        // Items under revision are skipped rather than refused: "mark all issued"
+        // is a convenience across a whole phase, and failing the lot because one
+        // drawing is mid-revision would be worse than quietly leaving that one
+        // out. It stays un-issued, which is the truth about it, and the caller is
+        // told how many were actually changed.
+        ...(isComplete ? { revisions: { none: { status: 'OPEN' } } } : {}),
+      },
       data: {
         isComplete,
         completedAt: isComplete ? new Date() : null,

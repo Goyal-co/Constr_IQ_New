@@ -550,7 +550,15 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
                     <td data-summary>
                       <Checkbox
                         checked={file.isComplete}
-                        disabled={!canEdit}
+                        // Under revision, closing the revision is the only route
+                        // to issued — so the box is disabled rather than left to
+                        // fail on click. The server refuses it either way.
+                        disabled={!canEdit || file.underRevision}
+                        title={
+                          file.underRevision
+                            ? 'Under revision — close the open revision to issue this.'
+                            : undefined
+                        }
                         label={`Mark ${file.name} issued`}
                         onChange={(next) => {
                           // Issuing prompts for a note; un-issuing does not —
@@ -582,8 +590,15 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
                       <RowToggle expanded={rows.isOpen(file.id)} label={file.name} />
                     </td>
                     <td data-label="Rev">
-                      <span className="rev-chip" data-issued={file.currentRevision > 0}>
-                        {formatRevision(file.currentRevision)}
+                      <span className="row gap-2">
+                        <span className="rev-chip" data-issued={file.currentRevision > 0}>
+                          {formatRevision(file.currentRevision)}
+                        </span>
+                        {file.underRevision && (
+                          <Badge tone="warning" lozenge>
+                            Revising
+                          </Badge>
+                        )}
                       </span>
                     </td>
                     <td data-label="Expected">
@@ -861,7 +876,12 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                     <td data-summary>
                       <Checkbox
                         checked={item.designComplete}
-                        disabled={!canEdit}
+                        disabled={!canEdit || item.underRevision}
+                        title={
+                          item.underRevision
+                            ? 'Under revision — close the open revision to issue this.'
+                            : undefined
+                        }
                         label={`Mark ${item.name} designed`}
                         onChange={(next) => {
                           // Approving opens the note prompt; un-approving does
@@ -886,8 +906,15 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                       <RowToggle expanded={rows.isOpen(item.id)} label={item.name} />
                     </td>
                     <td data-label="Rev">
-                      <span className="rev-chip" data-issued={item.currentRevision > 0}>
-                        {formatRevision(item.currentRevision)}
+                      <span className="row gap-2">
+                        <span className="rev-chip" data-issued={item.currentRevision > 0}>
+                          {formatRevision(item.currentRevision)}
+                        </span>
+                        {item.underRevision && (
+                          <Badge tone="warning" lozenge>
+                            Revising
+                          </Badge>
+                        )}
                       </span>
                     </td>
                     <td data-label="Drawing expected">

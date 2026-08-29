@@ -152,6 +152,15 @@ export interface DesignFile {
   revisions: DrawingRevision[];
   /** Discussion on this drawing, newest first. */
   comments: ActivityComment[];
+
+  /**
+   * True while a revision is open on it.
+   *
+   * Derived rather than looked up in `revisions` by every caller: the checkbox,
+   * the badge and the bulk action all need the same answer, and each deriving
+   * it separately is three chances to disagree.
+   */
+  underRevision: boolean;
 }
 
 /**
@@ -225,6 +234,15 @@ export interface WorkItem {
 
   /** Discussion on this activity, newest first. */
   comments: ActivityComment[];
+
+  /**
+   * True while a revision is open on it.
+   *
+   * Derived rather than looked up in `revisions` by every caller: the checkbox,
+   * the badge and the bulk action all need the same answer, and each deriving
+   * it separately is three chances to disagree.
+   */
+  underRevision: boolean;
   /** When the design is due to be issued. */
   designExpectedDate: IsoDate | null;
   /** Stamped when the design is marked issued; cleared if reopened. */

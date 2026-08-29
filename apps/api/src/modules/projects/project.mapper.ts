@@ -116,6 +116,7 @@ export function toDesignFile(
     daysUntilExpected: row.expectedDate ? diffDays(now, row.expectedDate) : null,
     isOverdue: isDesignOverdue(row.expectedDate, row.isComplete, now),
     currentRevision: row.currentRevision,
+    underRevision: (row.revisions ?? []).some((r) => r.status === 'OPEN'),
     revisions: (row.revisions ?? []).map(toDrawingRevision),
     comments: (row.comments ?? []).map(toActivityComment),
 
@@ -293,6 +294,7 @@ export function toWorkItem(
 
     // Denormalised on the row, so a list does not need one query per item.
     currentRevision: row.currentRevision,
+    underRevision: (row.revisions ?? []).some((r) => r.status === 'OPEN'),
     // Newest first: the current revision and the latest remark are what a
     // reader wants, and older ones are history they scroll to.
     revisions: (row.revisions ?? []).map(toDrawingRevision),
