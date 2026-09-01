@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   ACTIVITY_STATUS_LABELS,
   buildProgrammeChart,
@@ -39,7 +39,18 @@ type HoverState =
   | { kind: 'bar'; bar: ProgrammeBar; x: number; y: number }
   | { kind: 'milestone'; milestone: ProgrammeMilestone; x: number; y: number };
 
-export function ProgrammeChart({
+/**
+ * Memoised.
+ *
+ * The chart is the most expensive thing on the page — it rebuilds a window,
+ * ticks and sixteen rows of geometry — and it only depends on the dates. Without
+ * this it re-rendered whenever anything else on the project page changed state:
+ * a dialog opening, a row expanding, a comment being typed.
+ *
+ * It still rebuilds when the work items genuinely change, which is correct — an
+ * edited date must move its bar.
+ */
+export const ProgrammeChart = memo(function ProgrammeChart({
   workItems,
   designFiles = [],
   handoverDate,
@@ -497,7 +508,7 @@ export function ProgrammeChart({
       )}
     </div>
   );
-}
+});
 
 /**
  * The hover readout.

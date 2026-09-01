@@ -107,7 +107,19 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  await app.listen(port, '0.0.0.0');
+  /**
+   * `::` rather than `0.0.0.0`, so the socket is dual-stack.
+   *
+   * Bound to IPv4 only, a client resolving `localhost` gets `::1` first, waits
+   * for that connection to fail, and then retries on IPv4. On Windows that wait
+   * is about 200ms — paid on *every* request, before the server sees any of
+   * them. It made a local page load feel broken while the server itself was
+   * answering in four milliseconds.
+   *
+   * Node opens `::` as dual-stack unless `ipv6Only` is set, so this still
+   * accepts IPv4 and every container platform still reaches it.
+   */
+  await app.listen(port, '::');
 
   logger.log(`API listening on http://localhost:${port}/${apiPrefix}`);
   if (!isProduction) logger.log(`API docs at http://localhost:${port}/${apiPrefix}/docs`);

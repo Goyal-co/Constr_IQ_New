@@ -16,6 +16,7 @@ import {
   IconCheck,
   IconChevronDown,
   IconFilter,
+  IconGrip,
   IconInfo,
   IconTrash,
   IconX,
@@ -759,6 +760,37 @@ export function RowToggle({ expanded, label }: { expanded: boolean; label: strin
       tabIndex={-1}
     >
       <IconChevronDown size={16} />
+    </button>
+  );
+}
+
+/**
+ * The grip a row is dragged by.
+ *
+ * A handle rather than the whole row: these rows are full of date inputs and
+ * selects, and making the row itself draggable would mean every attempt to
+ * put a caret in a field started a drag instead.
+ *
+ * It is a real button, so it is reachable by keyboard — Alt+ArrowUp/Down moves
+ * the row without any dragging at all.
+ */
+export function DragHandle({
+  label,
+  dragging,
+  ...handlers
+}: {
+  label: string;
+  dragging?: boolean;
+} & React.HTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      type="button"
+      className="drag-handle"
+      aria-label={`Reorder ${label}. Hold and drag, or press Alt with the up and down arrows.`}
+      data-dragging={dragging || undefined}
+      {...handlers}
+    >
+      <IconGrip size={14} />
     </button>
   );
 }

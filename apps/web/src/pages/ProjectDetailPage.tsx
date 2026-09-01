@@ -16,6 +16,7 @@ import {
 } from '@ciq/shared';
 import { ApiRequestError, downloadFile } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { useReorderable } from '@/lib/useReorderable';
 import { useRowExpansion } from '@/lib/useRowExpansion';
 import {
   useBulkDesign,
@@ -26,6 +27,8 @@ import {
   useDeleteDesignFile,
   useDeleteMaterial,
   useDeleteProject,
+  useReorderDesignFiles,
+  useReorderWorkItems,
   useDeleteWorkItem,
   usePhases,
   useProject,
@@ -43,6 +46,7 @@ import {
   Checkbox,
   ConfirmDialog,
   DeleteButton,
+  DragHandle,
   EmptyState,
   Kpi,
   Menu,
@@ -474,6 +478,11 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
 
   /** The drawing whose comments and revisions are open, if any. */
   const rows = useRowExpansion();
+  const reorderFiles = useReorderDesignFiles(project.id);
+  const reorder = useReorderable({
+    items: project.designFiles,
+    onCommit: (ids) => reorderFiles.mutate(ids),
+  });
   const [openFile, setOpenFile] = useState<string | null>(null);
   /** The drawing being marked issued, held while its note is written. */
   const [approving, setApproving] = useState<DesignFile | null>(null);
@@ -545,9 +554,20 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
                 </tr>
               </thead>
               <tbody>
-                {project.designFiles.map((file) => (
-                  <tr key={file.id} {...rows.rowProps(file.id)}>
+                {reorder.ordered.map((file) => (
+                  <tr
+                    key={file.id}
+                    data-dragging={reorder.dragId === file.id || undefined}
+                    {...rows.rowProps(file.id)}
+                  >
                     <td data-summary>
+                      {canEdit && (
+                        <DragHandle
+                          label={file.name}
+                          dragging={reorder.dragId === file.id}
+                          {...reorder.handleProps(file.id)}
+                        />
+                      )}
                       <Checkbox
                         checked={file.isComplete}
                         // Under revision, closing the revision is the only route
@@ -792,6 +812,7 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
   const [draft, setDraft] = useState('');
 
   const rows = useRowExpansion();
+  const reorderItems = useReorderWorkItems(project.id);
   /** The activity whose comments and revisions are open, if any. */
   const [openItem, setOpenItem] = useState<string | null>(null);
   /** The activity being marked designed, held while its note is written. */
@@ -801,9 +822,19 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
   const [materialName, setMaterialName] = useState('');
   const [materialDate, setMaterialDate] = useState('');
 
+  // Computed before the early return below, because the reorder hook needs it
+  // and a hook cannot sit behind a conditional return.
+  const items = useMemo(
+    () => (phase ? project.workItems.filter((w) => w.phase.id === phase.id) : []),
+    [project.workItems, phase],
+  );
+
+  // Reordering is per phase — the rows a reader sees together are the rows they
+  // are putting in order. The server rewrites only the ids it is sent.
+  const reorder = useReorderable({ items, onCommit: (ids) => reorderItems.mutate(ids) });
+
   if (!phase) return <EmptyState title="No phases in use on this project yet" />;
 
-  const items = project.workItems.filter((w) => w.phase.id === phase.id);
   const done = items.filter((w) => w.designComplete).length;
   const allDone = done === items.length && done > 0;
   const canEdit = can('drawing:update');
@@ -871,9 +902,20 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr key={item.id} {...rows.rowProps(item.id)}>
+                {reorder.ordered.map((item) => (
+                  <tr
+                    key={item.id}
+                    data-dragging={reorder.dragId === item.id || undefined}
+                    {...rows.rowProps(item.id)}
+                  >
                     <td data-summary>
+                      {canEdit && (
+                        <DragHandle
+                          label={item.name}
+                          dragging={reorder.dragId === item.id}
+                          {...reorder.handleProps(item.id)}
+                        />
+                      )}
                       <Checkbox
                         checked={item.designComplete}
                         disabled={!canEdit || item.underRevision}
@@ -1705,6 +1747,10 @@ function ExecutionPhasePanel({
   const [draft, setDraft] = useState('');
 
   const rows = useRowExpansion();
+  const reorderItems = useReorderWorkItems(project.id);
+  // The same rows as Drawing, so the same order — reordering in either view
+  // moves the one underlying item, which is the point of it being one row.
+  const reorder = useReorderable({ items, onCommit: (ids) => reorderItems.mutate(ids) });
   const [openItem, setOpenItem] = useState<string | null>(null);
   /**
    * A status change waiting on its note.
@@ -1797,7 +1843,7 @@ function ExecutionPhasePanel({
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => {
+              {reorder.ordered.map((item) => {
                 const isBlocked = !item.gate.canStart && item.executionStatus !== 'DONE';
 
                 const dateCell = (
@@ -1823,8 +1869,19 @@ function ExecutionPhasePanel({
                 );
 
                 return (
-                  <tr key={item.id} {...rows.rowProps(item.id)}>
+                  <tr
+                    key={item.id}
+                    data-dragging={reorder.dragId === item.id || undefined}
+                    {...rows.rowProps(item.id)}
+                  >
                     <td data-summary data-label="Work item">
+                      {canEdit && (
+                        <DragHandle
+                          label={item.name}
+                          dragging={reorder.dragId === item.id}
+                          {...reorder.handleProps(item.id)}
+                        />
+                      )}
                       <div className="grow" style={{ minWidth: 0 }}>
                         <div className="font-medium truncate">{item.name}</div>
                         {isBlocked && (

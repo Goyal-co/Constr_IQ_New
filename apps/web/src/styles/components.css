@@ -2678,3 +2678,58 @@ tr:hover .row-action,
 .gantt-diamond--sm[data-kind='expected'] {
   border-width: 1.5px;
 }
+
+/* ==========================================================================
+   Drag handle
+   ========================================================================== */
+
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-placeholder);
+  /* Without this the browser scrolls the page instead of letting the pointer
+     drag the row on touch. */
+  touch-action: none;
+  cursor: grab;
+}
+
+.drag-handle:hover {
+  color: var(--text-secondary);
+  background: var(--surface-hover);
+}
+
+.drag-handle[data-dragging='true'] {
+  cursor: grabbing;
+  color: var(--accent-solid);
+}
+
+/* The row being carried. Lifted rather than tinted, so the phase colour and
+   status on it still read while it moves. */
+tr[data-dragging='true'] {
+  position: relative;
+  z-index: 2;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+tr[data-dragging='true'] td {
+  border-bottom-color: transparent;
+}
+
+/* Rows slide to their new slot instead of teleporting, so the eye can follow
+   which one moved. Suppressed for anybody who asked for less motion. */
+tbody tr {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  tbody tr {
+    transition: none;
+  }
+}
