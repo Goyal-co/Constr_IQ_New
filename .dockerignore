@@ -1,46 +1,57 @@
-# Build context exclusions.
+# Build context is the repo root (see railway.json / render.yaml).
+# Keep the context small and never send secrets or host artifacts.
 #
-# This file has to live at the repository root, not next to a Dockerfile: Docker
-# reads `.dockerignore` from the *context* directory, and both images here are
-# built with the repo root as context because they need the root manifests and
-# the shared package. An ignore file sitting in `apps/api/` is silently never
-# read, which is how a 700MB node_modules tree ends up being uploaded to the
-# daemon on every build.
+# This file has to live at the root, not next to a Dockerfile: Docker reads
+# `.dockerignore` from the *context* directory, so one sitting in `apps/api/` is
+# silently never read — which is how a 700MB node_modules tree ends up being
+# uploaded to the daemon on every build.
 #
-# The `**/` prefixes matter for the same reason patterns are easy to get wrong:
-# a bare `node_modules` matches only the one at the root, leaving every
-# workspace's copy in the context.
+# It is shared by BOTH images — apps/api/Dockerfile and apps/web/Dockerfile —
+# since both build from this context. Anything excluded here is excluded from
+# both, which is why `apps/web` is not excluded even though the API image has no
+# use for it: doing so would leave the web build with no source to compile. See
+# apps/api/Dockerfile.dockerignore for how the API build drops it anyway.
+#
+# The `**/` prefixes matter: a bare `node_modules` matches only the one at the
+# root, leaving every workspace's copy in the context.
+
+.git
+.github
+.claude
+.gitignore
+.dockerignore
 
 **/node_modules
 **/dist
 **/dist-seed
 **/build
+**/coverage
 **/.turbo
+**/.cache
 **/*.tsbuildinfo
 
-.git
-.github
-.vscode
-.idea
-.claude
-
-# Never bake real credentials into an image layer. `.env.example` is kept — it
-# is documentation, and it carries no secrets.
+.env
+.env.*
+!.env.example
 **/.env
 **/.env.*
 !**/.env.example
 
-**/coverage
-**/*.log
-**/npm-debug.log*
-**/.DS_Store
-**/Thumbs.db
-
-# Documentation and deployment descriptors are not inputs to either build.
+# Docs and local tooling — not required at runtime.
 *.md
-!README.md
+!apps/api/**/*.md
 docker-compose.yml
 render.yaml
 railway.json
 vercel.json
-**/vercel.json
+apps/web/vercel.json
+
+# Tests and editor noise
+**/*.test.ts
+**/*.spec.ts
+**/.DS_Store
+**/Thumbs.db
+**/*.log
+**/npm-debug.log*
+**/.vscode
+**/.idea

@@ -1,0 +1,58 @@
+# Extra exclusions for the API image only.
+#
+# BuildKit looks for `<dockerfile path>.dockerignore` before falling back to the
+# context's `.dockerignore`, so this file applies to `-f apps/api/Dockerfile`
+# and to nothing else. That is what lets the API build drop the web client —
+# which it has no use for — while `apps/web/Dockerfile`, building from the same
+# context, still receives it.
+#
+# When this file is used it REPLACES the root .dockerignore rather than adding
+# to it, so the root rules are repeated below. Keep the two in step.
+#
+# On a builder without BuildKit this file is ignored and the root .dockerignore
+# applies instead: the API context is then larger than it needs to be, which
+# costs upload time and nothing else. It degrades to slower, never to wrong.
+
+.git
+.github
+.claude
+.gitignore
+.dockerignore
+
+**/node_modules
+**/dist
+**/dist-seed
+**/build
+**/coverage
+**/.turbo
+**/.cache
+**/*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# The web client is deployed separately (Vercel, or apps/web/Dockerfile).
+# This is the one line that differs from the root file.
+apps/web
+
+# Docs and local tooling — not required at runtime.
+*.md
+!apps/api/**/*.md
+docker-compose.yml
+render.yaml
+railway.json
+vercel.json
+
+# Tests and editor noise
+**/*.test.ts
+**/*.spec.ts
+**/.DS_Store
+**/Thumbs.db
+**/*.log
+**/npm-debug.log*
+**/.vscode
+**/.idea
