@@ -1,7 +1,8 @@
 import { ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
-import { IS_PUBLIC_KEY } from '../auth-context';
+import { IS_PUBLIC_KEY, type AuthenticatedUser } from '../auth-context';
+import { enrichRequestContext } from '../logging/request-context';
 
 /**
  * Global authentication guard — applied to every route unless marked `@Public()`.
@@ -25,6 +26,23 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   handleRequest<TUser>(err: unknown, user: TUser, info: unknown): TUser {
+    if (user) {
+      /**
+       * Attribute every subsequent log line to the caller.
+       *
+       * Done here rather than in an interceptor because this is the first point
+       * at which the identity exists, and doing it now means even a line logged
+       * by a pipe or another guard carries it. Only the two ids are recorded —
+       * an email address in a log is personal data sitting somewhere with a
+       * long retention and loose access.
+       */
+      const principal = user as AuthenticatedUser;
+      enrichRequestContext({
+        userId: principal.id,
+        organisationId: principal.organisationId,
+      });
+    }
+
     if (err || !user) {
       // Distinguish expiry from a malformed token so the client knows whether to
       // attempt a silent refresh or bounce the user to the login screen.

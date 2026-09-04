@@ -1,0 +1,74 @@
+# nginx configuration for the web container.
+#
+# A `.template` rather than a `.conf`: the nginx image runs `envsubst` over
+# everything in /etc/nginx/templates at start-up, which is how `${PORT}` below
+# becomes a real port number. Managed hosts inject their own port and expect the
+# process to bind it, so a hard-coded `listen 8080` makes the container
+# unreachable on any of them.
+
+server {
+    listen       ${PORT};
+    server_name  _;
+    root         /usr/share/nginx/html;
+    index        index.html;
+
+    access_log   /dev/stdout;
+    error_log    /dev/stderr warn;
+
+    # Vite emits no .gz alongside its output, so compress on the way out rather
+    # than using gzip_static.
+    gzip              on;
+    gzip_vary         on;
+    gzip_min_length   1024;
+    gzip_proxied      any;
+    gzip_types        text/plain text/css application/javascript application/json
+                      image/svg+xml application/manifest+json;
+
+    # ---- Health -----------------------------------------------------------
+    # The container's own liveness endpoint. Deliberately not a file on disk:
+    # this answers even if the bundle failed to copy, which distinguishes "nginx
+    # is up but has nothing to serve" from "nginx is down" — two different
+    # problems that look identical if the probe just fetches `/`.
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain always;
+        return 200 "ok\n";
+    }
+
+    # ---- Caching ----------------------------------------------------------
+    # Content-hashed filenames, so they can be cached forever.
+    #
+    # `add_header` rather than `expires`: the two both emit Cache-Control, and
+    # using them together sends the header twice with different values.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri =404;
+    }
+
+    location /brand/ {
+        add_header Cache-Control "public, max-age=86400" always;
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri =404;
+    }
+
+    # index.html must NOT be cached. It is the document that names the hashed
+    # bundles; served stale after a deploy it points at files that no longer
+    # exist, and the app comes up blank with a 404 in the console.
+    #
+    # This block is reached by the internal redirect from `try_files` below as
+    # well as by a direct request, which is why the security headers have to be
+    # repeated here — see the snippet for why nginx does not inherit them.
+    location = /index.html {
+        add_header Cache-Control "no-cache, must-revalidate" always;
+        include /etc/nginx/snippets/security-headers.conf;
+    }
+
+    # ---- Routing ----------------------------------------------------------
+    # Single-page app: every unmatched path is a client-side route, not a
+    # missing file. This is the nginx equivalent of the Vercel rewrite.
+    location / {
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri $uri/ /index.html;
+    }
+}

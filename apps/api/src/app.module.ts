@@ -36,6 +36,20 @@ import { WorkItemsModule } from './modules/work-items/work-items.module';
       isGlobal: true,
       cache: true,
       load: [configuration],
+      /**
+       * One `.env` for the whole repository, at its root.
+       *
+       * The API's working directory is `apps/api` under `npm run dev`, so the
+       * default lookup finds only a file sitting there — which is how this ends
+       * up with one env file per workspace, three copies of `DATABASE_URL`, and
+       * a deployment that works because two of them happen to agree.
+       *
+       * The root file is listed second so a local `apps/api/.env` still wins if
+       * somebody keeps one for an experiment. In a container neither file
+       * exists and every value comes from the real environment, which takes
+       * precedence over both.
+       */
+      envFilePath: ['.env', '../../.env'],
       // Runs before anything else, so a missing or malformed variable fails the
       // boot with a readable message rather than surfacing as a runtime error.
       validate: validateEnv,

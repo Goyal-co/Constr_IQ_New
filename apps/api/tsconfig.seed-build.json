@@ -1,0 +1,20 @@
+{
+  // Compiles the seed to plain JavaScript for the runtime image.
+  //
+  // tsconfig.seed.json next to this one type-checks the seed for `ts-node` in a
+  // development checkout and emits nothing. That is not enough for a container:
+  // the runtime stage installs with `--omit=dev`, so `ts-node` is not there and
+  // `npm run db:seed` fails with `ts-node: not found` — at exactly the moment
+  // somebody is trying to create the first administrator on a fresh deployment.
+  //
+  // Output lands in dist-seed/prisma/seed.js, which `npm run db:seed:dist` runs.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-seed",
+    "noEmit": false,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["prisma/**/*.ts"]
+}

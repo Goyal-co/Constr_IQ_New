@@ -49,6 +49,25 @@ services:
       - key: WEB_APP_URL
         sync: false
 
+      # Read only by the one-off seed that creates the first administrator:
+      #
+      #   Render -> the service -> Shell
+      #   npm run db:seed -w @ciq/api
+      #
+      # Run it once, after the first successful deploy. It is not part of the
+      # start command, because migrations must run on every deploy and this must
+      # not. Re-running it is harmless — it never overwrites an existing
+      # password — but once the account exists, delete BOOTSTRAP_OWNER_PASSWORD
+      # from here. Nothing reads it again.
+      - key: BOOTSTRAP_OWNER_EMAIL
+        sync: false
+      - key: BOOTSTRAP_OWNER_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_OWNER_NAME
+        sync: false
+      - key: BOOTSTRAP_ORG_NAME
+        sync: false
+
       # Email is off until you set MAIL_DRIVER=brevo and supply a key.
       - key: MAIL_DRIVER
         value: log

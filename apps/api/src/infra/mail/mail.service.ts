@@ -147,6 +147,11 @@ export class MailService implements OnModuleInit {
       try {
         const response = await fetch('https://api.brevo.com/v3/account', {
           headers: { 'api-key': this.settings.brevoApiKey ?? '', accept: 'application/json' },
+          // Bounded, because this runs behind a health probe. `fetch` has no
+          // default timeout, so a Brevo outage that hangs the socket rather than
+          // refusing it would hold the probe open until the platform gave up and
+          // restarted a container that was working perfectly well.
+          signal: AbortSignal.timeout(4_000),
         });
         return response.ok;
       } catch {

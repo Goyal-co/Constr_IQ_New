@@ -20,6 +20,32 @@ export const envSchema = z
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().positive().default(4000),
     API_PREFIX: z.string().default('api/v1'),
+
+    /**
+     * How much to log, and in what shape.
+     *
+     * Both are left optional and resolved against NODE_ENV below, because the
+     * right default genuinely differs: a developer wants readable colour and
+     * every query; a production log aggregator wants one JSON object per line
+     * and not the queries.
+     *
+     * The levels are Nest's own, ordered loudest-last. Setting one enables it
+     * and everything above it, so `debug` gives error+warn+log+debug.
+     */
+    LOG_LEVEL: z.enum(['error', 'warn', 'log', 'debug', 'verbose']).optional(),
+    LOG_FORMAT: z.enum(['json', 'pretty']).optional(),
+
+    /**
+     * Log every SQL statement Prisma issues, with its duration.
+     *
+     * Off by default even in development: it is genuinely useful when chasing an
+     * N+1, and pure noise the rest of the time. Never enable it in production —
+     * query parameters are logged, and those contain personal data.
+     */
+    PRISMA_LOG_QUERIES: bool.default('false'),
+
+    /** A query slower than this is logged as a warning. */
+    SLOW_QUERY_MS: z.coerce.number().int().positive().default(300),
     CORS_ORIGINS: z.string().default('http://localhost:5173'),
 
     DATABASE_URL: z.string().url('DATABASE_URL must be a valid connection string'),
@@ -150,6 +176,17 @@ export function buildConfig(env: Env) {
   return {
     env: env.NODE_ENV,
     isProduction: env.NODE_ENV === 'production',
+    logging: {
+      // `log` in production, `debug` outside it. Production at `debug` would
+      // mean a line per cache decision and per query plan, which costs money on
+      // a hosted log service and buries the lines that matter.
+      level: env.LOG_LEVEL ?? (env.NODE_ENV === 'production' ? 'log' : 'debug'),
+      // One JSON object per line where something is going to parse them;
+      // aligned, coloured text where a person is reading them.
+      format: env.LOG_FORMAT ?? (env.NODE_ENV === 'production' ? 'json' : 'pretty'),
+      queries: env.PRISMA_LOG_QUERIES,
+      slowQueryMs: env.SLOW_QUERY_MS,
+    },
     port: env.PORT,
     apiPrefix: env.API_PREFIX,
     // Trailing slashes are stripped because a browser's `Origin` header never

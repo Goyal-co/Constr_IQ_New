@@ -80,8 +80,18 @@ is enough.
 
 ### Environment
 
-Full annotated list in [`apps/api/.env.example`](apps/api/.env.example). The
-required set:
+**One file configures everything.** [`.env.example`](.env.example) at the
+repository root is the annotated list, for the API and the web client together.
+There is no `apps/api/.env.example` and no `apps/web/.env.example` — the API
+reads the root file (`envFilePath` in `app.module.ts`) and so does Vite
+(`envDir` in `vite.config.ts`), so there is one place a value can be wrong
+instead of three that have to agree.
+
+Only `VITE_`-prefixed variables reach the browser bundle, so sharing the file
+does not put a secret into downloadable JavaScript.
+
+On a host that takes variables through a dashboard rather than a file — Render,
+Railway, Vercel — paste from that same file. The required set:
 
 ```
 NODE_ENV=production
@@ -160,43 +170,239 @@ Note the variable names: if you have these written down as `EMAIL_FROM` and
 
 `GET /api/v1/health/ready` reports the mail transport alongside the database, so
 you can confirm the key is accepted without waiting for the weekly digest to
-fire:
+fire. See [Health endpoints](#health-endpoints) below for the full response.
 
-```json
-{ "status": "ok", "checks": { "database": "ok", "mail": "ok" } }
-```
-
-`"mail": "error"` does not make the service unready — a broken relay degrades
-digests but does not stop anyone using the app — so watch the field rather than
-the overall status.
-
-### First run — creating the owner account
+### First run — creating the administrator account
 
 Migrations create the tables but no rows, so the first sign-in needs the
-bootstrap to have run once. It creates the organisation, the owner account and
-the two work phases, and nothing else.
+bootstrap to have run **once**. It creates one organisation and one owner
+account, and nothing else — no phases, no categories, no templates, no sample
+projects. Those are created from the Settings screens by whoever signs in.
+
+Because the workspace starts genuinely empty, the first thing to do after
+signing in is **Settings → Phases**: a project with no phases has nowhere to add
+its first activity.
+
+It is a deploy-time command, deliberately **not** part of the container's start
+command. Migrations must run on every deploy; this must not.
+
+There are no default credentials. The four values below have to be set, and the
+seed stops with a message naming the missing one rather than falling back to
+something that is published in this repository:
+
+| Variable                   |                                                      |
+| -------------------------- | ---------------------------------------------------- |
+| `BOOTSTRAP_OWNER_EMAIL`    | the sign-in address                                  |
+| `BOOTSTRAP_OWNER_PASSWORD` | the first password                                   |
+| `BOOTSTRAP_ORG_NAME`       | the organisation                                     |
+| `BOOTSTRAP_OWNER_NAME`     | display name — optional, defaults to `Administrator` |
 
 The simplest route on any host is to run it from your own machine against the
-production database — the bootstrap only inserts rows, so it needs nothing but a
+production database. The bootstrap only inserts rows, so it needs nothing but a
 connection string:
 
 ```bash
-DATABASE_URL='<your Neon pooled URL>' npm run db:seed -w @ciq/api
+DATABASE_URL='<your Neon pooled URL>' BOOTSTRAP_OWNER_EMAIL='you@example.com' BOOTSTRAP_OWNER_PASSWORD='<a long one>' BOOTSTRAP_ORG_NAME='Your Company' npm run db:seed -w @ciq/api
 ```
 
 On Windows PowerShell:
 
 ```
-$env:DATABASE_URL='<your Neon pooled URL>'; npm run db:seed -w @ciq/api
+$env:DATABASE_URL='<your Neon pooled URL>'; $env:BOOTSTRAP_OWNER_EMAIL='you@example.com'; $env:BOOTSTRAP_OWNER_PASSWORD='<a long one>'; $env:BOOTSTRAP_ORG_NAME='Your Company'; npm run db:seed -w @ciq/api
 ```
 
-Render's free plan has no shell, which is why this is the documented path.
-Railway has one under **Deployments → ⋮ → Shell**, or `railway run npm run
-db:seed -w @ciq/api`.
+Render's free plan has no shell, which is why this is the documented path. On a
+paid Render instance the variables are already in the environment, so it is just
+`npm run db:seed:dist -w @ciq/api` from **the service → Shell**. Railway has a
+shell under **Deployments → ⋮ → Shell**. Under compose:
 
-It is idempotent and never overwrites an existing account's password, so
-re-running it is harmless. Set `BOOTSTRAP_OWNER_EMAIL` / `BOOTSTRAP_OWNER_PASSWORD`
-in the environment first if you want different credentials than the defaults.
+```bash
+docker compose --profile app run --rm api npm run db:seed:dist -w @ciq/api
+```
+
+Note the `:dist` suffix **inside a container**. The runtime image installs with
+`--omit=dev`, so `ts-node` is not present and plain `npm run db:seed` fails with
+`ts-node: not found`; the image ships a compiled copy of the same script, which
+`db:seed:dist` runs. From a development checkout, `npm run db:seed` is correct.
+
+**Afterwards, delete `BOOTSTRAP_OWNER_PASSWORD` from the deployment
+environment.** Nothing reads it again, and a live password sitting in a
+dashboard is one more place for it to leak. Re-running the seed on a later
+deploy is harmless — it never overwrites an existing account's password, so it
+reports what it found and changes nothing — but it is not needed.
+
+Note that the app requires 12 characters when _changing_ a password. A shorter
+bootstrap password signs in fine but cannot be replaced with one the same
+length; the seed warns about this when it applies.
+
+## Redeploys never delete data
+
+Deploying again runs migrations and starts the server. That is all it does.
+
+|                         | Runs when                                        | Can it delete?                                                                                                                                                          |
+| ----------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prisma migrate deploy` | every deploy, from the container's start command | **No.** It applies pending migrations only. On drift it fails and refuses to start rather than rebuilding the schema.                                                   |
+| The bootstrap seed      | never automatically — you run it once, by hand   | **No.** It only inserts. It does not delete a row, and it does not overwrite an existing account's password, so a second run reports what it found and changes nothing. |
+| `prisma migrate reset`  | never in any deploy path                         | **Yes — it drops every table.** Guarded; see below.                                                                                                                     |
+
+So the safe sequence for a later deployment is the ordinary one: push, let it
+build, done. Nothing needs re-seeding — the administrator, and everything the
+organisation has since created, is already there.
+
+**The one command that can destroy data is `npm run db:reset -w @ciq/api`**, and
+it is guarded. `apps/api/scripts/guard-destructive.js` refuses unless
+`DATABASE_URL` names a host on this machine, and refuses outright under
+`NODE_ENV=production`. The failure it exists for is mundane: a production
+connection string exported into a shell an hour earlier for a migration, then
+`db:reset` typed out of habit — nothing on that command line says which database
+is about to be emptied.
+
+Under compose, the equivalent is `docker compose down -v`. The `-v` deletes the
+named volumes, and with them the local Postgres data. `docker compose down`
+without it stops the containers and keeps everything.
+
+A migration that itself drops a column is still a migration you have written and
+reviewed; nothing here can catch that for you. The three added most recently
+were checked for exactly this — the one that moved comments onto design files
+was hand-written as a `RENAME` because Prisma's generated diff wanted a
+`DROP TABLE`, which would have destroyed the comments already in it.
+
+---
+
+## Health endpoints
+
+Two probes, doing two different jobs. Which one a platform is pointed at
+matters, and getting it backwards causes restart loops.
+
+|               | Path                       | Touches                | A failure means                                                            |
+| ------------- | -------------------------- | ---------------------- | -------------------------------------------------------------------------- |
+| **Liveness**  | `GET /api/v1/health`       | nothing                | the process is wedged — **restart it**                                     |
+| **Readiness** | `GET /api/v1/health/ready` | the database, and mail | this instance cannot serve — **take it out of rotation, leave it running** |
+
+**Point the platform's health check at `/health`.** `render.yaml` and
+`railway.json` already do, and so does the `HEALTHCHECK` in
+`apps/api/Dockerfile`. Pointing it at `/health/ready` instead turns a slow first
+database connection — a Neon instance waking from cold — into a failed deploy or
+a restart loop against a process that is working perfectly well.
+
+Liveness answers immediately and never touches a dependency:
+
+```json
+{
+  "status": "ok",
+  "uptimeSeconds": 27,
+  "version": "1.0.0",
+  "commit": "a1b2c3d",
+  "timestamp": "2026-09-04T09:12:23.328Z"
+}
+```
+
+`commit` is read from whichever of `GIT_COMMIT`, `RENDER_GIT_COMMIT`,
+`RAILWAY_GIT_COMMIT_SHA` or `VERCEL_GIT_COMMIT_SHA` the host sets, so it answers
+"did my deploy actually go out?" without configuration.
+
+Readiness checks each dependency, times it, and holds it to a four-second
+deadline — an unbounded check is worse than none, because the platform's own
+probe timeout fires first and the container gets restarted for something a
+restart cannot fix:
+
+```json
+{
+  "status": "ok",
+  "checks": {
+    "database": { "status": "ok", "latencyMs": 39 },
+    "mail": { "status": "ok", "latencyMs": 5 }
+  },
+  "uptimeSeconds": 27,
+  "timestamp": "2026-09-04T09:12:23.328Z"
+}
+```
+
+- **The status code carries the verdict**: `200` ready, `503` not. A readiness
+  endpoint that reports trouble in its body and still answers `200` is never
+  acted on by anything.
+- **The database decides readiness. Mail does not.** A broken relay degrades
+  digests but does not stop anyone using the app, so it reports
+  `"status": "degraded"` at `200` rather than pulling the only instance out of
+  rotation and taking the application down with it.
+- **The mail check is cached for a minute.** Verifying Brevo is an outbound call
+  to a third party; probed every 30 seconds it would be roughly 3,000 calls a
+  day against somebody else's rate limit to answer a question whose answer
+  almost never changes.
+- **Failure detail is withheld in production.** These endpoints are public — a
+  probe cannot authenticate — and a Prisma connection error quotes the database
+  host back at you. Outside production the real message is shown.
+
+The web container has its own liveness endpoint at `GET /healthz`, served by
+nginx itself rather than from a file on disk, so it still answers if the bundle
+failed to copy. That distinguishes "nginx is up with nothing to serve" from
+"nginx is down" — two different problems that look identical to a probe that
+just fetches `/`.
+
+---
+
+## Running it in containers
+
+Both images build from the **repository root**, never from `apps/api` or
+`apps/web`: each needs the root manifests and the `@ciq/shared` workspace, and a
+narrower context cannot see them. `.dockerignore` lives at the root for the same
+reason — Docker reads it from the context directory, so one sitting next to a
+Dockerfile is silently never read.
+
+```bash
+docker build -f apps/api/Dockerfile -t ciq-api .
+
+docker build -f apps/web/Dockerfile -t ciq-web   --build-arg VITE_API_URL=https://your-api.example.com/api/v1 .
+```
+
+### Nothing is configured inside the images
+
+Every URL, port, credential and secret comes from the environment. Moving the
+API to a new host or giving the web app a real domain is a change to `.env` —
+no edit to a Dockerfile, no edit to `docker-compose.yml`.
+
+The one exception is unavoidable and worth knowing about: **`VITE_API_URL` is a
+build argument, not a runtime variable.** Vite substitutes `import.meta.env` at
+build time, so the API's address is compiled into the JavaScript. Setting it in
+the web container's environment has no effect — changing it means rebuilding the
+web image. The build fails with a message rather than defaulting, because the
+failure mode of a wrong default is silent: the image builds, the page loads, and
+every request goes somewhere else until a person notices.
+
+The API takes `PORT` and `API_PREFIX` from the environment, and so does its
+`HEALTHCHECK`. Managed hosts inject their own port — Render uses 10000 — and a
+check pinned to 4000 reports every one of those containers as unhealthy.
+
+### Compose
+
+```bash
+cp .env.example .env                        # then set the values
+
+docker compose up -d                        # infrastructure only: Postgres,
+                                            # object storage, a mail catcher.
+                                            # Run the app with `npm run dev`.
+
+docker compose --profile app up -d --build  # the whole application in
+                                            # containers
+```
+
+The `app` profile keeps the everyday loop cheap: `docker compose up -d` brings
+up what the dev server needs and builds no images.
+
+Then create the administrator once:
+
+```bash
+docker compose --profile app run --rm api npm run db:seed:dist -w @ciq/api
+```
+
+`.env` carries a host and a container form of the three addresses that differ
+depending on where the process runs — `DATABASE_URL` / `DOCKER_DATABASE_URL`,
+`S3_ENDPOINT` / `DOCKER_S3_ENDPOINT`, `SMTP_HOST` / `DOCKER_SMTP_HOST`. Inside
+the compose network a service is reached by name on its own port; from the host
+it is reached on the published one. For a managed database, set both forms to
+the same connection string.
+
+---
 
 ## 2. Web client (Vercel)
 
@@ -213,16 +419,18 @@ package.
 ### Environment — one variable
 
 ```
-VITE_API_URL=https://your-api.up.railway.app/api/v1
+VITE_API_URL=https://your-api.onrender.com/api/v1
 ```
 
-Include the `/api/v1` prefix; no trailing slash.
+Include the `/api/v1` prefix; no trailing slash. It comes from the same
+[`.env.example`](.env.example) as everything else — Vite reads the repository
+root, not `apps/web`.
 
-Nothing else belongs here. This is a static bundle on a CDN, so every value set
-in the Vercel project is compiled into JavaScript that visitors download —
-`DATABASE_URL`, JWT secrets, SMTP credentials and S3 keys must never be added.
-Vite only exposes `VITE_`-prefixed variables, which makes the mistake harder,
-not impossible.
+**Set only this one in the Vercel project.** A static bundle on a CDN compiles
+every value it is given into JavaScript that visitors download, so
+`DATABASE_URL`, JWT secrets, SMTP credentials and S3 keys must never be added
+here. Vite exposing only `VITE_`-prefixed variables makes that mistake harder,
+not impossible — a shared file is safe, a mis-prefixed secret is not.
 
 `VITE_API_URL` is read at **build** time. Changing it in the dashboard does
 nothing until you redeploy.

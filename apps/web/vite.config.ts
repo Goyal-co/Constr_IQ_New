@@ -4,6 +4,19 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   plugins: [react()],
+  /**
+   * Read `.env` from the repository root, not from apps/web.
+   *
+   * One file configures the whole stack. Vite defaults to looking beside this
+   * config, which is what produced a second env file holding a copy of the API
+   * URL — and a copy is a thing that goes stale silently: the client keeps
+   * building, it just points somewhere that is no longer right.
+   *
+   * Only `VITE_`-prefixed variables are exposed to the bundle, so sharing a file
+   * with the API does not put a JWT secret or a database URL into JavaScript
+   * the browser downloads.
+   */
+  envDir: resolve(__dirname, '../..'),
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

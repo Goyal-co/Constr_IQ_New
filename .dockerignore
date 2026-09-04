@@ -1,0 +1,46 @@
+# Build context exclusions.
+#
+# This file has to live at the repository root, not next to a Dockerfile: Docker
+# reads `.dockerignore` from the *context* directory, and both images here are
+# built with the repo root as context because they need the root manifests and
+# the shared package. An ignore file sitting in `apps/api/` is silently never
+# read, which is how a 700MB node_modules tree ends up being uploaded to the
+# daemon on every build.
+#
+# The `**/` prefixes matter for the same reason patterns are easy to get wrong:
+# a bare `node_modules` matches only the one at the root, leaving every
+# workspace's copy in the context.
+
+**/node_modules
+**/dist
+**/dist-seed
+**/build
+**/.turbo
+**/*.tsbuildinfo
+
+.git
+.github
+.vscode
+.idea
+.claude
+
+# Never bake real credentials into an image layer. `.env.example` is kept — it
+# is documentation, and it carries no secrets.
+**/.env
+**/.env.*
+!**/.env.example
+
+**/coverage
+**/*.log
+**/npm-debug.log*
+**/.DS_Store
+**/Thumbs.db
+
+# Documentation and deployment descriptors are not inputs to either build.
+*.md
+!README.md
+docker-compose.yml
+render.yaml
+railway.json
+vercel.json
+**/vercel.json

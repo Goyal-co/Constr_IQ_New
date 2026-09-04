@@ -16,8 +16,10 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "ts-node -P tsconfig.seed.json prisma/seed.ts",
+    "db:seed:build": "tsc -p tsconfig.seed-build.json",
+    "db:seed:dist": "node dist-seed/prisma/seed.js",
     "db:studio": "prisma studio",
-    "db:reset": "prisma migrate reset --force"
+    "db:reset": "node scripts/guard-destructive.js && prisma migrate reset --force"
   },
   "prisma": {
     "seed": "ts-node -P tsconfig.seed.json prisma/seed.ts"

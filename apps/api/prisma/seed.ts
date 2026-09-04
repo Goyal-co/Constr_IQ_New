@@ -1,21 +1,44 @@
 /* eslint-disable no-console */
 /**
- * Bootstrap.
- *
- * Creates the minimum an empty database needs to be usable: one organisation,
- * one owner account, and the two work phases the app's Design/Execution
- * sub-sections are built around. Nothing else — no sample projects, no demo
- * users, no pre-filled template. The organisation defines its own categories,
- * templates and projects from the Settings screens.
+ * Bootstrap — creates the administrator account, and nothing else.
  *
  *   npm run db:seed -w @ciq/api
  *
- * Idempotent, and safe to run against a live database. It never deletes
- * anything and never overwrites an existing account's password: re-running it
- * against a populated database is a no-op that reports what it found. That is
- * the opposite of the old development seed, which dropped and recreated a demo
- * organisation on every run — a bootstrap that resets production is a footgun,
- * not a convenience.
+ * There is no sample data here: no phases, no categories, no templates, no demo
+ * projects. An empty workspace is the correct starting state, because every one
+ * of those is organisation-defined data that the owner creates from the
+ * Settings screens. Seeding them would mean a new deployment starts with rows
+ * somebody has to notice and delete.
+ *
+ * The one row that cannot be created from the UI is the first account — there
+ * is nobody to sign in and create it — so that is what this does.
+ *
+ * ## Every value comes from the environment
+ *
+ * No credential is written in this file. A default administrator password in
+ * source control is a published password: it reaches every clone, every image
+ * layer and every log of this file, and a deployment that forgets to override
+ * it is reachable by anybody who has read the repository. So the four variables
+ * below are required, and the script refuses to run without them rather than
+ * falling back to something guessable.
+ *
+ *   BOOTSTRAP_OWNER_EMAIL      the sign-in address
+ *   BOOTSTRAP_OWNER_PASSWORD   the first password, changed after first sign-in
+ *   BOOTSTRAP_OWNER_NAME       display name                  (optional)
+ *   BOOTSTRAP_ORG_NAME         the organisation's name
+ *   BOOTSTRAP_ORG_SLUG         its stable identifier         (optional)
+ *
+ * ## Run it once, not on every boot
+ *
+ * This is a deploy-time command, deliberately not part of the container's start
+ * command — see apps/api/Dockerfile, which runs `prisma migrate deploy` and
+ * then starts the server. Migrations must run on every deploy; this must not.
+ *
+ * It is nonetheless safe if it does run again. It never deletes anything and
+ * never touches an existing account's password: a second run against a live
+ * database prints what it found and changes nothing. That matters because the
+ * alternative — a bootstrap that resets the owner's password back to whatever
+ * is in the deployment environment — would silently undo a rotation.
  */
 
 import { PrismaClient, type Prisma } from '@prisma/client';
@@ -26,50 +49,71 @@ const prisma = new PrismaClient();
 
 const BCRYPT_ROUNDS = 12;
 
-/**
- * The owner account.
- *
- * Overridable by environment so a deployment can bootstrap with its own
- * credentials without editing source — the defaults are what was asked for and
- * what a fresh local database gets.
- */
-const OWNER_EMAIL = (process.env.BOOTSTRAP_OWNER_EMAIL ?? 'superadmin@goyalco.com')
-  .trim()
-  .toLowerCase();
-const OWNER_PASSWORD = process.env.BOOTSTRAP_OWNER_PASSWORD ?? 'Goyalco@12@';
-const OWNER_NAME = process.env.BOOTSTRAP_OWNER_NAME ?? 'Super Admin';
-
-const ORG_NAME = process.env.BOOTSTRAP_ORG_NAME ?? 'Goyal & Co. | Hariyana Group';
-const ORG_SLUG = process.env.BOOTSTRAP_ORG_SLUG ?? 'goyal-co-hariyana-group';
+/** The app's own floor for a password set through the change-password screen. */
+const PASSWORD_MIN_LENGTH = 12;
 
 /**
- * The two work phases.
+ * Reads a required variable, or explains what to set and stops.
  *
- * Kept because they are structural rather than sample data: Design and
- * Execution each render one sub-section per phase, so a database with none
- * gives a new project nowhere to add its first work item. Both are ordinary
- * rows — rename, recolour, add or archive them in Settings → Phases.
+ * Failing here is the point. The alternative is a default, and a default
+ * administrator credential is worse than a failed deploy.
  */
-const PHASES = [
-  { name: 'Civil', colour: '#d98a20' },
-  { name: 'Finishing', colour: '#22a06b' },
-];
+function required(name: string, describe: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    console.error(`\nMissing ${name} — ${describe}.\n`);
+    console.error('Set it in the environment this command runs in. For example:\n');
+    console.error('  Render      Dashboard → the service → Environment');
+    console.error('  Docker      the .env file compose reads, or `docker compose run --rm`');
+    console.error('  Locally     the .env file at the repository root\n');
+    process.exit(1);
+  }
+  return value;
+}
+
+/** Falls back to a derived or cosmetic value — never to a credential. */
+function optional(name: string, fallback: string): string {
+  return process.env[name]?.trim() || fallback;
+}
+
+/** `Goyal & Co. | Hariyana Group` → `goyal-co-hariyana-group`. */
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
 async function main(): Promise<void> {
+  const ownerEmail = required(
+    'BOOTSTRAP_OWNER_EMAIL',
+    'the address the administrator signs in with',
+  ).toLowerCase();
+  const ownerPassword = required('BOOTSTRAP_OWNER_PASSWORD', 'the administrator’s first password');
+  const orgName = required('BOOTSTRAP_ORG_NAME', 'the organisation this workspace belongs to');
+
+  const ownerName = optional('BOOTSTRAP_OWNER_NAME', 'Administrator');
+  const orgSlug = optional('BOOTSTRAP_ORG_SLUG', slugify(orgName));
+
   console.log('Bootstrapping…\n');
 
-  // --- Organisation ---------------------------------------------------------
-  // Matched on slug, which is the stable identifier; the display name can be
-  // changed later in Settings without breaking a re-run.
-  let organisation = await prisma.organisation.findUnique({ where: { slug: ORG_SLUG } });
+  /**
+   * The organisation.
+   *
+   * Not sample data: every row in this application is scoped to one, and a user
+   * cannot exist without it. It is created here because it is structural, and
+   * matched on slug rather than name so renaming the organisation in Settings
+   * does not cause a re-run to create a second one.
+   */
+  let organisation = await prisma.organisation.findUnique({ where: { slug: orgSlug } });
 
   if (organisation) {
     console.log(`  Organisation: ${organisation.name} (already present)`);
   } else {
     organisation = await prisma.organisation.create({
       data: {
-        name: ORG_NAME,
-        slug: ORG_SLUG,
+        name: orgName,
+        slug: orgSlug,
         settings: DEFAULT_SETTINGS as unknown as Prisma.InputJsonValue,
         reportSetting: { create: { title: 'Portfolio Status Report', commentary: '' } },
       },
@@ -77,68 +121,46 @@ async function main(): Promise<void> {
     console.log(`  Organisation: ${organisation.name} (created)`);
   }
 
-  // --- Owner ----------------------------------------------------------------
-  // Scoped to the organisation: email is unique per tenant, not globally, so the
-  // same address can legitimately exist in another organisation.
+  // Email is unique per organisation rather than globally, so the same address
+  // can legitimately exist in another tenant.
   const existingOwner = await prisma.user.findFirst({
-    where: { organisationId: organisation.id, email: OWNER_EMAIL },
+    where: { organisationId: organisation.id, email: ownerEmail },
   });
 
   if (existingOwner) {
-    // Deliberately not re-hashing the password. If this ran on a schedule, or a
-    // deploy hook, silently resetting the owner's password back to the default
-    // would undo every rotation they had made.
-    console.log(`  Owner:        ${OWNER_EMAIL} (already exists — password left unchanged)`);
-  } else {
-    await prisma.user.create({
-      data: {
-        organisationId: organisation.id,
-        name: OWNER_NAME,
-        email: OWNER_EMAIL,
-        role: 'OWNER',
-        passwordHash: await bcrypt.hash(OWNER_PASSWORD, BCRYPT_ROUNDS),
-      },
-    });
-    console.log(`  Owner:        ${OWNER_EMAIL} (created)`);
+    console.log(`  Administrator: ${ownerEmail} (already exists — password left unchanged)`);
+    console.log('\nNothing to do. This database is already bootstrapped.');
+    return;
   }
 
-  // --- Phases ---------------------------------------------------------------
-  for (const [position, spec] of PHASES.entries()) {
-    const existing = await prisma.phase.findFirst({
-      where: { organisationId: organisation.id, name: spec.name },
-    });
-    if (existing) {
-      console.log(`  Phase:        ${spec.name} (already present)`);
-      continue;
-    }
-    await prisma.phase.create({
-      data: { organisationId: organisation.id, ...spec, position },
-    });
-    console.log(`  Phase:        ${spec.name} (created)`);
+  await prisma.user.create({
+    data: {
+      organisationId: organisation.id,
+      name: ownerName,
+      email: ownerEmail,
+      role: 'OWNER',
+      passwordHash: await bcrypt.hash(ownerPassword, BCRYPT_ROUNDS),
+    },
+  });
+  console.log(`  Administrator: ${ownerEmail} (created)`);
+
+  console.log(`\nSign in as ${ownerEmail} with the password from BOOTSTRAP_OWNER_PASSWORD.`);
+  console.log('Change it after the first sign-in, then remove that variable from the');
+  console.log('deployment environment — nothing reads it again.');
+
+  if (ownerPassword.length < PASSWORD_MIN_LENGTH) {
+    // A warning rather than a refusal: this password is accepted at sign-in, it
+    // is only the change-password screen that enforces the floor. Being told
+    // that now beats discovering it while locked out of choosing a new one.
+    console.log(
+      `\nNote: BOOTSTRAP_OWNER_PASSWORD is ${ownerPassword.length} characters. The app requires` +
+        `\n${PASSWORD_MIN_LENGTH} when setting a new one, so the replacement must be longer.`,
+    );
   }
 
-  // --- What the workspace actually contains ---------------------------------
-  const [users, categories, templates, projects] = await Promise.all([
-    prisma.user.count({ where: { organisationId: organisation.id } }),
-    prisma.category.count({ where: { organisationId: organisation.id } }),
-    prisma.template.count({ where: { organisationId: organisation.id } }),
-    prisma.project.count({ where: { organisationId: organisation.id } }),
-  ]);
-
-  console.log(
-    `\n  Users ${users} · Categories ${categories} · Templates ${templates} · Projects ${projects}`,
-  );
-
-  if (!existingOwner) {
-    console.log(`\nSign in as:\n\n  ${OWNER_EMAIL}\n  ${OWNER_PASSWORD}\n`);
-    console.log('Change this password after the first sign-in. Note that the app requires 12');
-    console.log('characters when setting a new one, so the replacement must be at least that.');
-  }
-
-  if (categories === 0) {
-    console.log('\nNext: create a category while adding your first project, then build a');
-    console.log('template in Settings → Templates so later projects arrive pre-filled.');
-  }
+  console.log('\nThe workspace is empty by design. Start in Settings → Phases, then create');
+  console.log('a category with your first project and a template so later projects arrive');
+  console.log('pre-filled.');
 }
 
 main()
