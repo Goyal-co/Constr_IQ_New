@@ -120,6 +120,11 @@ export class AuthService {
     });
 
     if (!user) {
+      // The address, not "unknown user": a support ticket that says sign-in is
+      // broken is usually a typo or the wrong tenant, and the address is what
+      // settles it. It is already in the request the caller sent.
+      this.logger.debug(`Sign-in attempt for an address with no account: ${dto.email}`);
+
       // Burn comparable CPU so response time does not reveal whether the account
       // exists. The hash is a fixed dummy; the comparison always fails.
       await bcrypt.compare(
@@ -131,6 +136,7 @@ export class AuthService {
 
     if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
       const minutes = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000);
+      this.logger.warn(`Sign-in refused — account ${user.id} is locked for ${minutes}m`);
       throw new UnauthorizedException(
         `Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
       );
@@ -140,6 +146,9 @@ export class AuthService {
 
     if (!matches) {
       const failedLoginCount = user.failedLoginCount + 1;
+      this.logger.debug(
+        `Wrong password for ${user.id} — attempt ${failedLoginCount} of ${maxLoginAttempts}`,
+      );
       const shouldLock = failedLoginCount >= maxLoginAttempts;
       await this.prisma.user.update({
         where: { id: user.id },
@@ -163,7 +172,10 @@ export class AuthService {
       throw new UnauthorizedException(generic);
     }
 
-    if (!user.isActive) throw new UnauthorizedException('This account has been deactivated.');
+    if (!user.isActive) {
+      this.logger.warn(`Sign-in refused — account ${user.id} is deactivated`);
+      throw new UnauthorizedException('This account has been deactivated.');
+    }
 
     const updated = await this.prisma.user.update({
       where: { id: user.id },
@@ -189,6 +201,18 @@ export class AuthService {
       },
       client,
     );
+
+    // The successful case, logged as plainly as the failures. A log that
+    // records only refusals cannot answer "was that person actually in the
+    // system at the time", which is the first question asked after any
+    // incident.
+    this.logger.log({
+      message: `Signed in: ${user.id}`,
+      userId: user.id,
+      organisationId: user.organisationId,
+      role: user.role,
+      previousLoginAt: user.lastLoginAt?.toISOString() ?? null,
+    });
 
     return { ...issued, user: toCurrentUser(updated, user.organisation) };
   }

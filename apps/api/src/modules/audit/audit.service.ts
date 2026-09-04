@@ -46,7 +46,31 @@ export class AuditService {
 
       // Skip no-op updates: a PATCH that changed nothing is noise that buries the
       // entries someone actually needs to find.
-      if (input.before && input.after && changes.length === 0) return;
+      if (input.before && input.after && changes.length === 0) {
+        this.logger.debug(`${input.action} on ${input.entityType} changed nothing — not recorded`);
+        return;
+      }
+
+      /**
+       * Every domain event, at `log`.
+       *
+       * This method is the funnel every mutation already passes through, so one
+       * line here covers projects, work items, drawings, materials, users and
+       * settings — rather than the same call repeated in fifteen services,
+       * where the one that gets forgotten is the new one.
+       *
+       * Field *names* only, never values. The audit table holds the values
+       * under access control; a log does not, and it usually has a longer
+       * retention and a wider audience.
+       */
+      this.logger.log({
+        message: `${input.action} ${input.entityType}:${input.entityId}`,
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        actorId: input.actorId ?? null,
+        changedFields: changes.map((c) => c.field),
+      });
 
       await this.prisma.auditLog.create({
         data: {
@@ -73,6 +97,18 @@ export class AuditService {
   async recordMany(inputs: AuditInput[]): Promise<void> {
     if (inputs.length === 0) return;
     try {
+      // A count rather than a line each: a bulk update of two hundred work
+      // items is one action a person took, and two hundred lines would bury
+      // everything around it.
+      this.logger.log({
+        message: `${inputs[0].action} ×${inputs.length} (bulk)`,
+        action: inputs[0].action,
+        entityType: inputs[0].entityType,
+        count: inputs.length,
+        actorId: inputs[0].actorId ?? null,
+      });
+      this.logger.verbose(`Bulk ids: ${inputs.map((i) => i.entityId).join(', ')}`);
+
       await this.prisma.auditLog.createMany({
         data: inputs.map((input) => {
           const changes = diffRecords(input.before ?? null, input.after ?? null);
@@ -95,6 +131,13 @@ export class AuditService {
   }
 
   async query(organisationId: string, dto: AuditQueryDto): Promise<Paginated<AuditEntry>> {
+    // Somebody reading the audit trail is itself worth a line — usually it
+    // happens while an incident is being investigated, and knowing when the
+    // looking started helps reconstruct the order of events afterwards.
+    this.logger.debug(
+      `Audit query: page ${dto.page} of ${dto.pageSize}${dto.entityType ? ` on ${dto.entityType}` : ''}`,
+    );
+
     const where = {
       organisationId,
       ...(dto.entityType ? { entityType: dto.entityType } : {}),

@@ -83,7 +83,10 @@ export class MailService implements OnModuleInit {
       return true;
     }
 
+    const started = Date.now();
     try {
+      this.logger.debug(`Sending "${message.subject}" to ${recipients.length} recipient(s)`);
+
       if (this.settings.driver === 'brevo') {
         await this.sendViaBrevo(recipients, message);
       } else {
@@ -95,6 +98,16 @@ export class MailService implements OnModuleInit {
           text: message.text ?? stripHtml(message.html),
         });
       }
+
+      // The success, not only the failure. A digest nobody received is usually
+      // reported as "the email never arrived", and this line is what separates
+      // "we never sent it" from "we sent it and the relay dropped it".
+      this.logger.log({
+        message: `Sent "${message.subject}" to ${joined}`,
+        driver: this.settings.driver,
+        recipients: recipients.length,
+        durationMs: Date.now() - started,
+      });
       return true;
     } catch (error) {
       this.logger.error(

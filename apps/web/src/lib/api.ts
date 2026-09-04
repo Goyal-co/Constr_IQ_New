@@ -1,4 +1,5 @@
 import type { ApiError, AuthTokens } from '@ciq/shared';
+import { createLogger } from './logger';
 
 /**
  * HTTP client.
@@ -14,6 +15,13 @@ import type { ApiError, AuthTokens } from '@ciq/shared';
  */
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api/v1';
+
+const log = createLogger('api');
+
+// Logged once, at load. Pointing a build at the wrong API is the single most
+// common deployment mistake here, and this is the line that settles it in one
+// glance at the console instead of a network-tab archaeology session.
+log.debug(`Base URL ${BASE_URL}`);
 
 const ACCESS_KEY = 'ciq.accessToken';
 const REFRESH_KEY = 'ciq.refreshToken';
@@ -94,6 +102,7 @@ export function onSessionExpired(listener: ExpiryListener): () => void {
 }
 
 function announceExpiry(): void {
+  log.warn('Session ended — clearing tokens and returning to sign-in');
   tokenStore.clear();
   expiryListeners.forEach((listener) => listener());
 }
@@ -109,20 +118,31 @@ async function refreshAccessToken(): Promise<string | null> {
 
   refreshInFlight = (async () => {
     const refreshToken = tokenStore.refresh;
-    if (!refreshToken) return null;
+    if (!refreshToken) {
+      log.debug('No refresh token stored — cannot refresh');
+      return null;
+    }
 
     try {
+      log.debug('Access token expired — refreshing');
       const response = await fetch(`${BASE_URL}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
       });
-      if (!response.ok) return null;
+      if (!response.ok) {
+        log.warn(`Refresh refused with ${response.status}`);
+        return null;
+      }
 
       const tokens = (await response.json()) as AuthTokens;
       tokenStore.set(tokens);
+      log.log('Access token refreshed');
       return tokens.accessToken;
-    } catch {
+    } catch (error) {
+      // A network failure, not a refusal. Worth distinguishing: one means the
+      // session is over, the other means the user is on a train.
+      log.warn('Refresh failed to reach the server', error);
       return null;
     } finally {
       // Cleared in a microtask so callers awaiting this promise all observe the
@@ -170,6 +190,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
 
+  const started = performance.now();
+  log.verbose(`→ ${rest.method ?? 'GET'} ${url.pathname}${url.search}`);
+
   let response = await send(anonymous ? null : tokenStore.access);
 
   // One retry after a refresh. A second 401 means the session is genuinely gone.
@@ -192,7 +215,25 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
 
-  if (!response.ok) throw new ApiRequestError(await readError(response));
+  const durationMs = Math.round(performance.now() - started);
+
+  if (!response.ok) {
+    const payload = await readError(response);
+    // `requestId` is the API's correlation id, echoed back in the error body.
+    // Quoting it in a bug report turns "a save failed this morning" into one
+    // grep on the server, which is the entire reason both sides carry it.
+    log.error(
+      `${rest.method ?? 'GET'} ${url.pathname} → ${payload.statusCode} in ${durationMs}ms: ${payload.message}`,
+      payload.requestId ? `requestId=${payload.requestId}` : '',
+    );
+    throw new ApiRequestError(payload);
+  }
+
+  // Slow enough that the user noticed. Logged as a warning so it stands out in
+  // a console that is otherwise quiet in production.
+  const line = `${rest.method ?? 'GET'} ${url.pathname} → ${response.status} in ${durationMs}ms`;
+  if (durationMs > 2000) log.warn(`Slow request: ${line}`);
+  else log.debug(line);
 
   if (response.status === 204) return undefined as T;
 

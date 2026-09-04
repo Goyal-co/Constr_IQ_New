@@ -235,6 +235,69 @@ Note that the app requires 12 characters when _changing_ a password. A shorter
 bootstrap password signs in fine but cannot be replaced with one the same
 length; the seed warns about this when it applies.
 
+## Logging
+
+Every level, not only errors — and structured, so a hosted log service can
+filter and alert on the fields rather than grepping sentences.
+
+| Level     | What lands there                                                                                            |
+| --------- | ----------------------------------------------------------------------------------------------------------- |
+| `error`   | 5xx responses with the stack, failed mail, failed audit writes                                              |
+| `warn`    | 4xx responses, slow queries, locked and deactivated accounts, refused refreshes                             |
+| `log`     | every request with status and duration, every domain event, sign-ins, exports, mail sent, boot and shutdown |
+| `debug`   | _why_ a 4xx happened, wrong-password attempts, SQL timings, cache and storage decisions                     |
+| `verbose` | the request arriving with IP and user-agent, bulk ids, signed-URL issuance                                  |
+
+`LOG_LEVEL` picks the floor and everything more severe comes with it, so
+`debug` gives error + warn + log + debug. Unset, it is `log` in production and
+`debug` everywhere else. `LOG_FORMAT` is `json` in production and `pretty`
+outside it.
+
+### Every line carries the request it belongs to
+
+```json
+{"timestamp":"2026-09-04T09:59:42.585Z","level":"verbose","context":"HTTP","message":"→ POST /api/v1/auth/login","ip":"::ffff:127.0.0.1","userAgent":"curl/8.15.0","requestId":"d215…"}
+{"timestamp":"2026-09-04T09:59:43.330Z","level":"warn","context":"HTTP","message":"POST /api/v1/auth/login → 401 745.0ms","status":401,"durationMs":745,"requestId":"d215…"}
+{"timestamp":"2026-09-04T09:59:43.331Z","level":"debug","context":"HTTP","message":"POST /api/v1/auth/login rejected with 401: Those credentials do not match our records.","requestId":"d215…"}
+```
+
+The `requestId` comes from an `AsyncLocalStorage` context opened by the
+request-id middleware, so a line logged four `await`s deep still carries it —
+without a `requestId` parameter on every method that might one day log. Once
+the auth guard has run, `userId` and `organisationId` are added too.
+
+That correlation is what makes logging below `error` worth having: twenty
+concurrent requests interleave into one stream, and an unattributed `debug`
+line tells you almost nothing. It is also what a user's bug report becomes
+actionable through — the API returns `requestId` in every error body and the
+browser console prints it, so "a save failed this morning" turns into one grep.
+
+### Slow queries are always on
+
+`SLOW_QUERY_MS` (default 300) logs a warning for any statement over it,
+regardless of level. It costs nothing on a healthy system, because a healthy
+system does not emit it. `PRISMA_LOG_QUERIES=true` logs _every_ statement at
+`debug` — useful for an N+1 hunt, and never to be enabled in production, where
+the parameters being logged are personal data.
+
+### The browser logs too
+
+Same level names. `warn` in a production build, `debug` in development, and
+raisable per-person without a redeploy:
+
+```js
+window.ciq.setLogLevel('debug');
+```
+
+That is a sentence you can read down a phone line, which is the point: it turns
+"can you reproduce it with the console open" into something a non-technical user
+can act on, on the machine where the problem actually happens. It logs the API
+base URL at load — pointing a build at the wrong API is the most common
+deployment mistake here — plus token refreshes, session expiry, any request over
+two seconds, and every failure with its `requestId`.
+
+---
+
 ## Redeploys never delete data
 
 Deploying again runs migrations and starts the server. That is all it does.
@@ -271,13 +334,19 @@ was hand-written as a `RENAME` because Prisma's generated diff wanted a
 
 ## Health endpoints
 
-Two probes, doing two different jobs. Which one a platform is pointed at
-matters, and getting it backwards causes restart loops.
+Five endpoints, because a platform asks different questions and answering them
+all the same way is how a healthy container ends up in a restart loop.
 
-|               | Path                       | Touches                | A failure means                                                            |
-| ------------- | -------------------------- | ---------------------- | -------------------------------------------------------------------------- |
-| **Liveness**  | `GET /api/v1/health`       | nothing                | the process is wedged — **restart it**                                     |
-| **Readiness** | `GET /api/v1/health/ready` | the database, and mail | this instance cannot serve — **take it out of rotation, leave it running** |
+|               | Path                         | Touches                             | A failure means                                                 |
+| ------------- | ---------------------------- | ----------------------------------- | --------------------------------------------------------------- |
+| **Liveness**  | `GET /api/v1/health`         | nothing                             | the process is wedged — **restart it**                          |
+| ”             | `GET /api/v1/health/live`    | nothing                             | alias, for charts that expect this name                         |
+| **Startup**   | `GET /api/v1/health/startup` | the schema                          | it has not finished booting — **wait**                          |
+| **Readiness** | `GET /api/v1/health/ready`   | database, migrations, storage, mail | it cannot serve — **take it out of rotation, leave it running** |
+| **Info**      | `GET /api/v1/health/info`    | nothing                             | — build, runtime and memory                                     |
+
+All five are public and exempt from rate limiting: a probe cannot authenticate,
+and a 429 on a health check reads as a dead instance.
 
 **Point the platform's health check at `/health`.** `render.yaml` and
 `railway.json` already do, and so does the `HEALTHCHECK` in
@@ -301,34 +370,55 @@ Liveness answers immediately and never touches a dependency:
 `RAILWAY_GIT_COMMIT_SHA` or `VERCEL_GIT_COMMIT_SHA` the host sets, so it answers
 "did my deploy actually go out?" without configuration.
 
-Readiness checks each dependency, times it, and holds it to a four-second
-deadline — an unbounded check is worse than none, because the platform's own
-probe timeout fires first and the container gets restarted for something a
-restart cannot fix:
+`/health/startup` reads a table rather than issuing `SELECT 1`. An image
+deployed against an un-migrated database connects perfectly and then fails every
+real request; this is what separates "the database is reachable" from "the
+database is the one this build expects". It latches once it has succeeded, so a
+later outage cannot make a running container look like it never booted — on a
+platform that treats a failed startup probe as fatal, that would kill it.
+
+Readiness checks four dependencies in parallel, times each one, and holds each
+to a four-second deadline — an unbounded check is worse than none, because the
+platform's own probe timeout fires first and the container gets restarted for
+something a restart cannot fix:
 
 ```json
 {
   "status": "ok",
   "checks": {
-    "database": { "status": "ok", "latencyMs": 39 },
-    "mail": { "status": "ok", "latencyMs": 5 }
+    "database": { "status": "ok", "latencyMs": 15 },
+    "migrations": { "status": "ok", "latencyMs": 26 },
+    "storage": { "status": "ok", "latencyMs": 7 },
+    "mail": { "status": "ok", "latencyMs": 4 }
   },
   "uptimeSeconds": 27,
-  "timestamp": "2026-09-04T09:12:23.328Z"
+  "timestamp": "2026-09-04T10:31:31.474Z"
 }
 ```
+
+**What fails readiness, and what only degrades it:**
+
+| Condition                                            | Result                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Database unreachable                                 | `503`                                                                                      |
+| A migration started and never finished               | `503` — the schema is in a state no version of the code expects                            |
+| Migrations in the image the database has not applied | `200 degraded`, with the names — usually a container run without its `migrate deploy` step |
+| Object storage unreachable                           | `200 degraded` — attachments fail, everything else works                                   |
+| Mail rejected                                        | `200 degraded` — digests are dropped, nobody is blocked                                    |
+
+The split matters: a broken relay is not a reason to pull the only instance out
+of rotation and take the whole application down with it. The pending-migration
+case is advisory rather than a `503` on purpose — it is detected by comparing a
+directory listing against a table, and a bug in _that_ comparison must not be
+able to remove a working service.
 
 - **The status code carries the verdict**: `200` ready, `503` not. A readiness
   endpoint that reports trouble in its body and still answers `200` is never
   acted on by anything.
-- **The database decides readiness. Mail does not.** A broken relay degrades
-  digests but does not stop anyone using the app, so it reports
-  `"status": "degraded"` at `200` rather than pulling the only instance out of
-  rotation and taking the application down with it.
-- **The mail check is cached for a minute.** Verifying Brevo is an outbound call
-  to a third party; probed every 30 seconds it would be roughly 3,000 calls a
-  day against somebody else's rate limit to answer a question whose answer
-  almost never changes.
+- **The advisory checks are cached for a minute.** Verifying Brevo and the S3
+  bucket are outbound calls to third parties; probed every 30 seconds they would
+  be roughly 3,000 calls a day each against somebody else's rate limit, to
+  answer a question whose answer almost never changes.
 - **Failure detail is withheld in production.** These endpoints are public — a
   probe cannot authenticate — and a Prisma connection error quotes the database
   host back at you. Outside production the real message is shown.

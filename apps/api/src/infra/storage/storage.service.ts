@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -8,8 +9,8 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, unlink } from 'node:fs/promises';
+import { constants as fsConstants, createReadStream, createWriteStream } from 'node:fs';
+import { access, mkdir, unlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import type { AppConfig } from '../../config/configuration';
@@ -75,8 +76,45 @@ export class StorageService implements OnModuleInit {
     return `${organisationId}/${entityType.toLowerCase()}/${entityId}/${randomUUID()}-${safeName}`;
   }
 
+  /**
+   * Can attachments actually be written? Surfaced through `/health/ready`.
+   *
+   * Checks reachability, not correctness of a single object: `HeadBucket` proves
+   * the endpoint resolves, the credentials are accepted and the bucket exists —
+   * the three things that are wrong when attachments fail on a fresh
+   * deployment. It writes nothing, so a probe every thirty seconds does not
+   * accumulate objects somebody has to clean up.
+   *
+   * Never throws. A health check that can throw turns a degraded dependency
+   * into a 500 on the endpoint whose job is to report degraded dependencies.
+   */
+  async verify(): Promise<{ ok: boolean; detail?: string }> {
+    try {
+      if (this.settings.driver === 's3') {
+        if (!this.client) return { ok: false, detail: 'the S3 client was never initialised' };
+        await this.client.send(new HeadBucketCommand({ Bucket: this.settings.bucket }));
+        return { ok: true };
+      }
+
+      // Local driver: the directory has to exist and be writable by the user
+      // the process runs as. In a container that is `node`, not root, and a
+      // directory left owned by root is the usual way this fails — silently,
+      // on the first upload, long after deployment.
+      const dir = resolve(this.settings.localDir);
+      await mkdir(dir, { recursive: true });
+      await access(dir, fsConstants.W_OK);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, detail: (error as Error).message };
+    }
+  }
+
   async put(key: string, body: Buffer, mimeType: string): Promise<StoredObject> {
     const checksum = createHash('sha256').update(body).digest('hex');
+    const started = Date.now();
+    this.logger.debug(
+      `Storing ${key} (${(body.byteLength / 1024).toFixed(0)}kB, ${mimeType}) via ${this.settings.driver}`,
+    );
 
     if (this.settings.driver === 's3' && this.client) {
       await this.client.send(
@@ -90,6 +128,12 @@ export class StorageService implements OnModuleInit {
           Metadata: { checksum },
         }),
       );
+      this.logger.log({
+        message: `Stored ${key}`,
+        driver: 's3',
+        sizeBytes: body.byteLength,
+        durationMs: Date.now() - started,
+      });
       return { storageKey: key, sizeBytes: body.byteLength, checksum };
     }
 
@@ -98,11 +142,18 @@ export class StorageService implements OnModuleInit {
     await pipeline(async function* () {
       yield body;
     }, createWriteStream(target));
+    this.logger.log({
+      message: `Stored ${key}`,
+      driver: 'local',
+      sizeBytes: body.byteLength,
+      durationMs: Date.now() - started,
+    });
     return { storageKey: key, sizeBytes: body.byteLength, checksum };
   }
 
   /** Time-limited URL. Expiry comes from config so it can be tightened per environment. */
   async signedUrl(key: string, fileName?: string): Promise<string> {
+    this.logger.verbose(`Signing a ${this.settings.signedUrlTtlSeconds}s URL for ${key}`);
     if (this.settings.driver === 's3' && this.client) {
       return getSignedUrl(
         this.client,
@@ -127,6 +178,7 @@ export class StorageService implements OnModuleInit {
         return;
       }
       await unlink(this.localPath(key));
+      this.logger.debug(`Deleted ${key}`);
     } catch (error) {
       // A missing object is the desired end state, so treat it as success.
       this.logger.warn(`Could not delete object ${key}: ${(error as Error).message}`);

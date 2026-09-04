@@ -29,9 +29,8 @@ export class RequestIdMiddleware implements NestMiddleware {
 
     // `next` is called inside the store, so everything downstream of this
     // middleware — including work resumed after an `await` — sees the context.
-    runWithRequestContext(
-      { requestId: id, method: req.method, path: req.originalUrl },
-      () => next(),
+    runWithRequestContext({ requestId: id, method: req.method, path: req.originalUrl }, () =>
+      next(),
     );
   }
 }

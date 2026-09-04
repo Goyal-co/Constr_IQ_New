@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import PdfPrinter from 'pdfmake';
 import type { CanvasElement, Content, TDocumentDefinitions } from 'pdfmake/interfaces';
@@ -91,6 +91,8 @@ export interface ExportFile {
  */
 @Injectable()
 export class ExportsService {
+  private readonly logger = new Logger(ExportsService.name);
+
   constructor(
     private readonly reports: ReportsService,
     private readonly projects: ProjectsService,
@@ -102,6 +104,8 @@ export class ExportsService {
   // -------------------------------------------------------------------------
 
   async portfolioWorkbook(organisationId: string, query: ReportQueryDto): Promise<ExportFile> {
+    const started = Date.now();
+    this.logger.debug(`Building the portfolio workbook (scope=${query.scope})`);
     const report = await this.reports.build(organisationId, query);
 
     const workbook = new ExcelJS.Workbook();
@@ -124,6 +128,15 @@ export class ExportsService {
     this.addPhaseSheet(workbook, report);
 
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    // Exports are the slowest thing the API does — they read a whole portfolio
+    // and render it. A size and a duration per export is what turns "the PDF
+    // takes ages" into a number that can be watched over time.
+    this.logger.log({
+      message: `Portfolio workbook ready (${(buffer.byteLength / 1024).toFixed(0)}kB)`,
+      kind: 'portfolio.xlsx',
+      bytes: buffer.byteLength,
+      durationMs: Date.now() - started,
+    });
     return {
       buffer,
       fileName: `portfolio-report-${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -374,6 +387,8 @@ export class ExportsService {
   // -------------------------------------------------------------------------
 
   async projectWorkbook(organisationId: string, projectId: string): Promise<ExportFile> {
+    const started = Date.now();
+    this.logger.debug(`Building the workbook for project ${projectId}`);
     const project = await this.projects.findOne(organisationId, projectId);
 
     const workbook = new ExcelJS.Workbook();
@@ -422,6 +437,15 @@ export class ExportsService {
     this.addProjectExecution(workbook, project);
 
     const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    // Exports are the slowest thing the API does — they read a whole portfolio
+    // and render it. A size and a duration per export is what turns "the PDF
+    // takes ages" into a number that can be watched over time.
+    this.logger.log({
+      message: `Project workbook ready (${(buffer.byteLength / 1024).toFixed(0)}kB)`,
+      kind: 'project.xlsx',
+      bytes: buffer.byteLength,
+      durationMs: Date.now() - started,
+    });
     return {
       buffer,
       fileName: `${slug(project.name)}-${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -560,6 +584,8 @@ export class ExportsService {
   // -------------------------------------------------------------------------
 
   async portfolioPdf(organisationId: string, query: ReportQueryDto): Promise<ExportFile> {
+    const started = Date.now();
+    this.logger.debug(`Building the portfolio PDF (scope=${query.scope})`);
     const [report, organisation] = await Promise.all([
       this.reports.build(organisationId, query),
       this.settings.getOrganisation(organisationId),
@@ -783,6 +809,15 @@ export class ExportsService {
     };
 
     const buffer = await this.renderPdf(definition);
+    // Exports are the slowest thing the API does — they read a whole portfolio
+    // and render it. A size and a duration per export is what turns "the PDF
+    // takes ages" into a number that can be watched over time.
+    this.logger.log({
+      message: `Portfolio PDF ready (${(buffer.byteLength / 1024).toFixed(0)}kB)`,
+      kind: 'portfolio.pdf',
+      bytes: buffer.byteLength,
+      durationMs: Date.now() - started,
+    });
     return {
       buffer,
       fileName: `portfolio-report-${new Date().toISOString().slice(0, 10)}.pdf`,
