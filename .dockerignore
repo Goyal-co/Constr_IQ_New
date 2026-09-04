@@ -1,0 +1,40 @@
+# Build context is the repo root (see railway.json / render.yaml).
+# Keep the context small and never send secrets or host artifacts.
+
+.git
+.github
+.claude
+.gitignore
+.dockerignore
+
+**/node_modules
+**/dist
+**/coverage
+**/.turbo
+**/.cache
+
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Web client is deployed separately (Vercel); not needed in the API image.
+apps/web
+
+# Docs and local tooling — not required at runtime.
+*.md
+!apps/api/**/*.md
+docker-compose.yml
+vercel.json
+apps/web/vercel.json
+
+# Tests and editor noise
+**/*.test.ts
+**/*.spec.ts
+**/.DS_Store
+**/*.log
+**/npm-debug.log*
+**/.vscode
+**/.idea
