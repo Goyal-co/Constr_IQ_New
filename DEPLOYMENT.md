@@ -134,8 +134,8 @@ hold — Brevo issues two, and they are not interchangeable.
 ```
 MAIL_DRIVER=brevo
 BREVO_API_KEY=xkeysib-…
-MAIL_FROM=alert@goyalco.email
-MAIL_FROM_NAME=Goyal & Co | Hariyana Group
+EMAIL_FROM=alert@goyalco.email
+EMAIL_FROM_NAME=Goyal & Co | Hariyana Group
 ```
 
 **If you have SMTP credentials** (from Brevo → SMTP & API → **SMTP**):
@@ -147,8 +147,8 @@ SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=<the login shown there, e.g. 8a1b2c001@smtp-brevo.com>
 SMTP_PASSWORD=<the SMTP key>
-MAIL_FROM=alert@goyalco.email
-MAIL_FROM_NAME=Goyal & Co | Hariyana Group
+EMAIL_FROM=alert@goyalco.email
+EMAIL_FROM_NAME=Goyal & Co | Hariyana Group
 ```
 
 Three things that catch people out:
@@ -156,7 +156,7 @@ Three things that catch people out:
 - **An API key is not an SMTP password.** Putting `xkeysib-…` in `SMTP_PASSWORD`
   fails with an opaque `535`. The API refuses to boot on that combination and
   says which setting you actually want.
-- **`MAIL_FROM` must be a verified sender.** Verify the address, or better the
+- **`EMAIL_FROM` must be a verified sender.** Verify the address, or better the
   whole domain, under Brevo → Senders, Domains & Dedicated IPs first. An
   unverified sender is rejected at submission, not silently dropped.
 - **`SMTP_SECURE=false` on port 587 is correct** — the session starts in the
@@ -165,8 +165,15 @@ Three things that catch people out:
   use port 2525 or switch to `MAIL_DRIVER=brevo`, which is plain HTTPS and is
   the safer default on a container host for exactly that reason.
 
-Note the variable names: if you have these written down as `EMAIL_FROM` and
-`EMAIL_FROM_NAME`, they are `MAIL_FROM` and `MAIL_FROM_NAME` here.
+The sender variables are `EMAIL_FROM` and `EMAIL_FROM_NAME`, matching what
+Brevo's dashboard calls them. They used to be `MAIL_FROM` / `MAIL_FROM_NAME`; an
+environment still holding the old names now fails to boot with a message naming
+the rename, rather than silently sending as the placeholder default that Brevo
+refuses.
+
+`BREVO_API_KEY` and `EMAIL_FROM` are both required when `MAIL_DRIVER=brevo` —
+checked at boot, so a misconfiguration surfaces on deploy rather than at 3am
+when the digest job runs.
 
 `GET /api/v1/health/ready` reports the mail transport alongside the database, so
 you can confirm the key is accepted without waiting for the weekly digest to

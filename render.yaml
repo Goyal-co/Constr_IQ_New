@@ -68,14 +68,31 @@ services:
       - key: BOOTSTRAP_ORG_NAME
         sync: false
 
-      # Email is off until you set MAIL_DRIVER=brevo and supply a key.
+      # Email through Brevo's HTTP API.
+      #
+      # Left at `log` here on purpose, even though Brevo is what we use: the API
+      # refuses to boot with MAIL_DRIVER=brevo and no key, so committing `brevo`
+      # would turn the next deploy into an outage on any environment where the
+      # three `sync: false` values below have not been filled in yet.
+      #
+      # To switch a service on: set BREVO_API_KEY, EMAIL_FROM and
+      # EMAIL_FROM_NAME in the dashboard, then change MAIL_DRIVER to `brevo`
+      # there. `/api/v1/health/ready` reports whether Brevo accepts the key.
       - key: MAIL_DRIVER
         value: log
       - key: BREVO_API_KEY
         sync: false
-      - key: MAIL_FROM
+
+      # EMAIL_FROM must be verified under Brevo -> Senders, Domains &
+      # Dedicated IPs. Brevo refuses an unverified sender at submission, so an
+      # unverified address means every message fails rather than some.
+      #
+      # These were MAIL_FROM / MAIL_FROM_NAME. If a service still has the old
+      # names set, the API now refuses to boot and names the rename — rather
+      # than silently sending as the placeholder default, which Brevo rejects.
+      - key: EMAIL_FROM
         sync: false
-      - key: MAIL_FROM_NAME
+      - key: EMAIL_FROM_NAME
         sync: false
 
       # Off on the free plan. A free service is suspended after ~15 minutes

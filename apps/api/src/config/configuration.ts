@@ -10,6 +10,9 @@ import { z } from 'zod';
 
 const bool = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1');
 
+/** Never verifiable with any provider, so it is never a usable production sender. */
+const PLACEHOLDER_SENDER = 'no-reply@constructiq.local';
+
 const PLACEHOLDER_SECRETS = [
   'change-me-access-secret-at-least-32-characters-long',
   'change-me-refresh-secret-at-least-32-characters-long',
@@ -19,6 +22,23 @@ export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     PORT: z.coerce.number().int().positive().default(4000),
+
+    /**
+     * The interface to bind.
+     *
+     * `0.0.0.0` — every IPv4 interface — because that is what every container
+     * platform's port scanner probes. Render says so explicitly, and a service
+     * that binds anything narrower is reported as having no open ports even
+     * though the process is running and answering.
+     *
+     * This was `::`, chosen to fix a local Windows problem where a browser
+     * resolving `localhost` tries `::1` first and waits ~200ms for it to fail.
+     * Node opens `::` dual-stack by default so it does accept IPv4 — but that
+     * behaviour depends on the host, it is invisible when it goes wrong, and a
+     * developer-experience tweak has no business deciding how production
+     * binds. Set HOST=:: locally if the latency is worth it there.
+     */
+    HOST: z.string().default('0.0.0.0'),
     API_PREFIX: z.string().default('api/v1'),
 
     /**
@@ -85,12 +105,17 @@ export const envSchema = z
 
     /**
      * The envelope sender. Must be an address Brevo has verified, or it rejects
-     * the message at submission. `MAIL_FROM` is the bare address; the display
+     * the message at submission. `EMAIL_FROM` is the bare address; the display
      * name is separate because the HTTP API takes the two as distinct fields
      * rather than as one "Name <addr>" string.
+     *
+     * Named to match what Brevo's own dashboard and our deployment environment
+     * call them. They were `MAIL_FROM` / `MAIL_FROM_NAME`; the check further
+     * down catches an environment still using the old names rather than letting
+     * it fall through to the default sender, which Brevo would reject.
      */
-    MAIL_FROM: z.string().default('no-reply@constructiq.local'),
-    MAIL_FROM_NAME: z.string().default('ConstructIQ Tracker'),
+    EMAIL_FROM: z.string().default(PLACEHOLDER_SENDER),
+    EMAIL_FROM_NAME: z.string().default('ConstructIQ Tracker'),
 
     SMTP_HOST: z.string().default('localhost'),
     SMTP_PORT: z.coerce.number().int().positive().default(1025),
@@ -134,6 +159,25 @@ export const envSchema = z
         message: 'BREVO_API_KEY is required when MAIL_DRIVER=brevo',
       });
     }
+
+    /**
+     * Brevo rejects an unverified sender at submission, and the default here
+     * (`no-reply@constructiq.local`) can never be verified — so a Brevo
+     * deployment without EMAIL_FROM does not fail loudly, it fails on every
+     * message with a 400 nobody is watching for.
+     */
+    if (env.MAIL_DRIVER === 'brevo' && env.EMAIL_FROM === PLACEHOLDER_SENDER) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['EMAIL_FROM'],
+        message:
+          'EMAIL_FROM is required when MAIL_DRIVER=brevo, and must be an address ' +
+          'verified under Brevo → Senders, Domains & Dedicated IPs.',
+      });
+    }
+
+    // The legacy MAIL_FROM / MAIL_FROM_NAME names are adopted before validation
+    // rather than rejected here — see `adoptLegacyNames` below for why.
     // A v3 key pasted into the SMTP password is the most likely way to configure
     // this wrong, and it fails with an opaque 535 from the relay.
     if (env.MAIL_DRIVER === 'smtp' && env.SMTP_PASSWORD?.startsWith('xkeysib-')) {
@@ -157,7 +201,42 @@ export const envSchema = z
 export type Env = z.infer<typeof envSchema>;
 
 /** Called by ConfigModule. Throws a readable aggregate error when validation fails. */
+/**
+ * `MAIL_FROM` / `MAIL_FROM_NAME` were renamed to `EMAIL_FROM` / `EMAIL_FROM_NAME`
+ * to match Brevo's own wording. An environment still holding the old names is
+ * adopted and warned about, not rejected.
+ *
+ * The danger in renaming a variable that has a default is falling back to the
+ * *default* — `no-reply@constructiq.local`, which Brevo can never verify, so
+ * every message fails with nobody watching. Carrying the old variable's actual
+ * value across has none of that: the sender is the one the operator configured,
+ * and the warning says what to rename.
+ *
+ * Refusing to boot would have been the other option, and it is the wrong one
+ * for a rename: it converts somebody else's correct configuration into an
+ * outage on the next deploy, to fix something that is only cosmetic.
+ */
+function adoptLegacyNames(raw: Record<string, unknown>): string[] {
+  const warnings: string[] = [];
+  for (const [legacy, current] of [
+    ['MAIL_FROM', 'EMAIL_FROM'],
+    ['MAIL_FROM_NAME', 'EMAIL_FROM_NAME'],
+  ] as const) {
+    if (raw[legacy] && !raw[current]) {
+      raw[current] = raw[legacy];
+      warnings.push(`${legacy} is deprecated — rename it to ${current}.`);
+    }
+  }
+  return warnings;
+}
+
 export function validateEnv(raw: Record<string, unknown>): Env {
+  for (const warning of adoptLegacyNames(raw)) {
+    // Before the logger exists, so console. Still reaches the platform's log.
+    // eslint-disable-next-line no-console
+    console.warn(`[config] ${warning}`);
+  }
+
   const result = envSchema.safeParse(raw);
   if (!result.success) {
     const lines = result.error.issues.map(
@@ -188,6 +267,7 @@ export function buildConfig(env: Env) {
       slowQueryMs: env.SLOW_QUERY_MS,
     },
     port: env.PORT,
+    host: env.HOST,
     apiPrefix: env.API_PREFIX,
     // Trailing slashes are stripped because a browser's `Origin` header never
     // has one, and the value here is almost always pasted from an address bar
@@ -221,8 +301,8 @@ export function buildConfig(env: Env) {
     mail: {
       driver: env.MAIL_DRIVER,
       brevoApiKey: env.BREVO_API_KEY,
-      from: env.MAIL_FROM,
-      fromName: env.MAIL_FROM_NAME,
+      from: env.EMAIL_FROM,
+      fromName: env.EMAIL_FROM_NAME,
       host: env.SMTP_HOST,
       port: env.SMTP_PORT,
       secure: env.SMTP_SECURE,

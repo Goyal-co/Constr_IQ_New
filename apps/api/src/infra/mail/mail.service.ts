@@ -79,7 +79,17 @@ export class MailService implements OnModuleInit {
     const joined = recipients.join(', ');
 
     if (this.settings.driver === 'log') {
-      this.logger.log(`[mail:log] To: ${joined} — ${message.subject}`);
+      /**
+       * Subject and recipients only — never the body.
+       *
+       * Invitation and password-reset messages carry a temporary password in
+       * plaintext, and this driver is the default. Logging the body would put
+       * working credentials into whatever ingests stdout, with that service's
+       * retention and its audience rather than this application's. The
+       * administrator who triggered the action already gets the password back
+       * in the API response, so nothing is lost by withholding it here.
+       */
+      this.logger.log(`[mail:log] To: ${joined} — ${message.subject} (body withheld)`);
       return true;
     }
 

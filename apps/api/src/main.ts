@@ -39,6 +39,7 @@ async function bootstrap(): Promise<void> {
   const isProduction = config.get('isProduction', { infer: true });
   const apiPrefix = config.get('apiPrefix', { infer: true });
   const port = config.get('port', { infer: true });
+  const host = config.get('host', { infer: true });
   const corsOrigins = config.get('corsOrigins', { infer: true });
 
   // Railway, Vercel and most load balancers terminate TLS upstream. Without this
@@ -121,19 +122,20 @@ async function bootstrap(): Promise<void> {
   }
 
   /**
-   * `::` rather than `0.0.0.0`, so the socket is dual-stack.
+   * `0.0.0.0` by default — see HOST in configuration.ts for why.
    *
-   * Bound to IPv4 only, a client resolving `localhost` gets `::1` first, waits
-   * for that connection to fail, and then retries on IPv4. On Windows that wait
-   * is about 200ms — paid on *every* request, before the server sees any of
-   * them. It made a local page load feel broken while the server itself was
-   * answering in four milliseconds.
-   *
-   * Node opens `::` as dual-stack unless `ipv6Only` is set, so this still
-   * accepts IPv4 and every container platform still reaches it.
+   * The address is logged as bound, not as configured. "Port scan timeout
+   * reached, no open ports detected" is a platform saying it could not find the
+   * socket, and the first thing you need in order to answer that is what the
+   * socket actually is. A line that reads `listening on 0.0.0.0:10000` settles
+   * in one glance what a line reading `listening on localhost` cannot.
    */
-  await app.listen(port, '::');
+  await app.listen(port, host);
 
+  const address = app.getHttpServer().address();
+  const bound =
+    address && typeof address === 'object' ? `${address.address}:${address.port}` : String(address);
+  logger.log(`Bound to ${bound} (HOST=${host}, PORT=${port})`);
   logger.log(`API listening on http://localhost:${port}/${apiPrefix}`);
   if (!isProduction) logger.log(`API docs at http://localhost:${port}/${apiPrefix}/docs`);
   logger.log(`CORS origins: ${corsOrigins.join(', ')}`);

@@ -91,4 +91,17 @@ ENTRYPOINT ["dumb-init", "--"]
 
 # Migrate at start (not build): the DB is unreachable in most build sandboxes,
 # and a rolling deploy must apply pending migrations before serving traffic.
-CMD ["sh", "-c", "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && node apps/api/dist/main.js"]
+#
+# Three things worth noting about this line:
+#
+#   `timeout 300` — migrate runs BEFORE the server binds a port, so anything
+#   that makes it hang is indistinguishable from a dead service: the platform
+#   waits out its port scan and reports "no open ports detected" with no
+#   explanation, because the container has printed nothing. Prisma can wait like
+#   this on a migration advisory lock left behind by a previous deploy that was
+#   killed mid-apply. Five minutes is far longer than a real migration and far
+#   shorter than a deploy window, so a hang now ends as a fast, loud exit 124.
+#
+#   `exec` — so node replaces the shell and receives SIGTERM from dumb-init
+#   directly, rather than sitting behind a shell that would not forward it.
+CMD ["sh", "-c", "timeout 300 npx prisma migrate deploy --schema apps/api/prisma/schema.prisma; status=$?; if [ $status -eq 124 ]; then echo 'FATAL: prisma migrate deploy exceeded 300s and was killed. A previous deploy may hold the migration advisory lock, or DATABASE_URL is unreachable.' >&2; exit 1; elif [ $status -ne 0 ]; then echo \"FATAL: prisma migrate deploy failed with status $status\" >&2; exit $status; fi; exec node apps/api/dist/main.js"]

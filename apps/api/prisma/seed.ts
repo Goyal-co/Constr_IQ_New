@@ -41,9 +41,31 @@
  * is in the deployment environment — would silently undo a rotation.
  */
 
+import { config as loadEnv } from 'dotenv';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { DEFAULT_SETTINGS } from '@ciq/shared';
+
+/**
+ * Load the repository-root `.env` before anything reads `process.env`.
+ *
+ * This is a standalone script, not part of the Nest application, so it never
+ * passes through `ConfigModule` and nothing else loads the file for it. Without
+ * this it read only what was exported into the shell — so filling in `.env` and
+ * running `npm run db:seed` failed with "Missing BOOTSTRAP_OWNER_EMAIL" while
+ * the value sat in the file two directories up.
+ *
+ * Two candidates, because the working directory differs: `apps/api` under
+ * `npm run db:seed`, the repo root when run from there or inside a container.
+ * A real environment variable always wins — `dotenv` does not overwrite one
+ * that is already set, which is what makes `BOOTSTRAP_OWNER_PASSWORD=… npm run
+ * db:seed` still work for a one-off.
+ */
+for (const candidate of [join(process.cwd(), '..', '..', '.env'), join(process.cwd(), '.env')]) {
+  if (existsSync(candidate)) loadEnv({ path: candidate });
+}
 
 const prisma = new PrismaClient();
 
