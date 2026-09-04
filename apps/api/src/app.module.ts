@@ -1,12 +1,14 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import configuration, { validateEnv } from './config/configuration';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { LoggingModule } from './common/logging/logging.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { PrismaModule } from './prisma/prisma.module';
 import { MailModule } from './infra/mail/mail.module';
@@ -64,6 +66,9 @@ import { WorkItemsModule } from './modules/work-items/work-items.module';
 
     ScheduleModule.forRoot(),
 
+    // First, so every other module can inject AppLogger during construction.
+    LoggingModule,
+
     PrismaModule,
     MailModule,
     StorageModule,
@@ -90,6 +95,16 @@ import { WorkItemsModule } from './modules/work-items/work-items.module';
     HealthModule,
   ],
   providers: [
+    /**
+     * The access log wraps every route.
+     *
+     * An interceptor rather than middleware, because middleware cannot see the
+     * outcome: it runs before the handler and has no hook on the response, so
+     * status and duration — the two fields that make an access log worth
+     * keeping — are not available to it.
+     */
+    { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
+
     // Order matters: authenticate, then rate-limit, then check permissions.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -20,6 +20,10 @@ import { getRequestContext } from './request-context';
  * That is the difference between logging below `error` being useful and being
  * noise: an unattributed `debug` line in a stream of twenty concurrent requests
  * tells you almost nothing.
+ *
+ * Callers may pass a string or an object. An object's `message` becomes the
+ * text and its other keys are kept as siblings in JSON — so a duration stays a
+ * number you can sort and alert on, rather than a fragment of a sentence.
  */
 
 /** The wire shape in production. One of these per line, newline-delimited. */
@@ -37,73 +41,91 @@ interface StructuredLine {
   [key: string]: unknown;
 }
 
+const ORDER: LogLevel[] = ['error', 'warn', 'log', 'debug', 'verbose'];
+
 /**
- * Transient scope.
+ * Level and format are process-wide, held statically.
  *
- * Nest injects a separate instance per consuming class, which is what lets each
- * one report its own `context` without every call site repeating the class
- * name.
+ * They have to be. `AppLogger` is transient-scoped so each injecting class gets
+ * its own instance with its own context, and configuring one of those in
+ * `main.ts` left every other instance on the defaults — the interceptor's copy
+ * quietly wrote unformatted text into an otherwise-JSON log while the
+ * bootstrap logger looked correct. Whether this process emits JSON is a fact
+ * about the process, not about one injection site.
+ */
+let settings: { level: LogLevel; json: boolean } = { level: 'log', json: false };
+
+/**
+ * Transient scope: Nest injects a separate instance per consuming class, which
+ * is what lets each report its own `context` without every call site repeating
+ * the class name.
  */
 @Injectable({ scope: Scope.TRANSIENT })
 export class AppLogger extends ConsoleLogger {
-  private json = false;
-
   /** Called once at boot, before anything is logged in anger. */
   configure(options: { level: LogLevel; format: 'json' | 'pretty' }): void {
-    this.json = options.format === 'json';
+    settings = { level: options.level, json: options.format === 'json' };
+    // Nest's own internal loggers read the levels off the instance passed to
+    // `useLogger`, so that one still has to be told.
     this.setLogLevels(levelsUpTo(options.level));
   }
 
   error(message: unknown, stackOrContext?: unknown, context?: string): void {
-    if (!this.json) return super.error(message as string, stackOrContext as string, context);
-    // Nest's own signature is overloaded: the second argument is a stack when
-    // there are three, and a context when there are two.
+    // Nest's signature is overloaded: with three arguments the second is a
+    // stack, with two it is a context.
     const stack = context === undefined ? undefined : (stackOrContext as string);
     const ctx = context ?? (stackOrContext as string | undefined);
-    this.write('error', message, ctx, stack);
+    this.emit('error', message, ctx, stack);
   }
 
   warn(message: unknown, context?: string): void {
-    if (!this.json) return super.warn(message as string, context);
-    this.write('warn', message, context);
+    this.emit('warn', message, context);
   }
 
   log(message: unknown, context?: string): void {
-    if (!this.json) return super.log(message as string, context);
-    this.write('log', message, context);
+    this.emit('log', message, context);
   }
 
   debug(message: unknown, context?: string): void {
-    if (!this.json) return super.debug(message as string, context);
-    this.write('debug', message, context);
+    this.emit('debug', message, context);
   }
 
   verbose(message: unknown, context?: string): void {
-    if (!this.json) return super.verbose(message as string, context);
-    this.write('verbose', message, context);
+    this.emit('verbose', message, context);
   }
 
-  private write(level: LogLevel, message: unknown, context?: string, stack?: string): void {
-    if (!this.isLevelEnabled(level)) return;
+  private emit(level: LogLevel, message: unknown, context?: string, stack?: string): void {
+    if (!isEnabled(level)) return;
 
     const request = getRequestContext();
+    const extra = isRecord(message) ? message : {};
+    const text = isRecord(message) ? String(message.message ?? '') : String(message);
+
+    if (!settings.json) {
+      // Pretty mode still has to render the extra fields, or an object-shaped
+      // call logs its text and silently drops the numbers that were the reason
+      // for making the call.
+      const suffix = renderFields({ ...extra, requestId: request?.requestId });
+      const line = suffix ? `${text} ${suffix}` : text;
+      if (level === 'error') super.error(line, stack, context);
+      else super[level](line, context);
+      return;
+    }
+
     const line: StructuredLine = {
       timestamp: new Date().toISOString(),
       level,
       context: context ?? this.context,
-      // A caller may pass an object to attach fields; its `message` becomes the
-      // text and the rest are merged as siblings, so they stay queryable rather
-      // than being flattened into a sentence.
-      ...(isRecord(message) ? message : {}),
-      message: isRecord(message) ? String(message.message ?? '') : String(message),
+      ...extra,
+      message: text,
       ...(request?.requestId ? { requestId: request.requestId } : {}),
       ...(request?.userId ? { userId: request.userId } : {}),
       ...(request?.organisationId ? { organisationId: request.organisationId } : {}),
       ...(stack ? { stack } : {}),
     };
 
-    // Straight to stdout. `console.log` would re-enter Nest's own formatting in
-    // some setups, and the platform reads stdout either way.
+    // Straight to stdout: the platform reads it either way, and going through
+    // `console` would re-enter Nest's formatting in some setups.
     process.stdout.write(`${safeStringify(line)}\n`);
   }
 }
@@ -113,9 +135,20 @@ export class AppLogger extends ConsoleLogger {
  * to be expanded into itself and everything more severe.
  */
 export function levelsUpTo(level: LogLevel): LogLevel[] {
-  const order: LogLevel[] = ['error', 'warn', 'log', 'debug', 'verbose'];
-  const index = order.indexOf(level);
-  return order.slice(0, index === -1 ? 3 : index + 1);
+  const index = ORDER.indexOf(level);
+  return ORDER.slice(0, index === -1 ? 3 : index + 1);
+}
+
+function isEnabled(level: LogLevel): boolean {
+  return ORDER.indexOf(level) <= ORDER.indexOf(settings.level);
+}
+
+/** `status=401 durationMs=767.5` — the structured fields, for human eyes. */
+function renderFields(fields: Record<string, unknown>): string {
+  return Object.entries(fields)
+    .filter(([key, value]) => key !== 'message' && value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${typeof value === 'object' ? safeStringify(value) : value}`)
+    .join(' ');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -132,12 +165,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 function safeStringify(value: unknown): string {
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value) ?? String(value);
   } catch {
-    return JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: 'warn',
-      message: 'A log line could not be serialised.',
-    });
+    return '"[unserialisable]"';
   }
 }

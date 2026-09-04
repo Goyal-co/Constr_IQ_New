@@ -7,22 +7,35 @@ import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { AppLogger, levelsUpTo } from './common/logging/app-logger';
 import type { AppConfig } from './config/configuration';
 import { PrismaService } from './prisma/prisma.service';
 
 async function bootstrap(): Promise<void> {
-  const logger = new Logger('Bootstrap');
-
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    // Nest's default logger; `debug` only outside production so query logs and
-    // verbose traces do not end up in a production log aggregator.
-    logger:
-      process.env.NODE_ENV === 'production'
-        ? ['error', 'warn', 'log']
-        : ['error', 'warn', 'log', 'debug', 'verbose'],
-  });
+  /**
+   * Buffer the boot logs.
+   *
+   * Nest logs a line per controller and per route while it wires the container,
+   * all before the configured logger exists. Buffering holds them until
+   * `useLogger` below, so those lines come out in the chosen format too — a
+   * production log that is JSON except for the first two hundred lines is a log
+   * whose parser breaks on startup, which is the worst moment for it.
+   */
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
 
   const config = app.get(ConfigService<AppConfig, true>);
+  const logging = config.get('logging', { infer: true });
+
+  // Transient scope, so `resolve` rather than `get`.
+  const appLogger = await app.resolve(AppLogger);
+  appLogger.configure(logging);
+  app.useLogger(appLogger);
+  app.flushLogs();
+
+  const logger = new Logger('Bootstrap');
+  logger.log(
+    `Logging at "${logging.level}" (${levelsUpTo(logging.level).join(', ')}) in ${logging.format} format`,
+  );
   const isProduction = config.get('isProduction', { infer: true });
   const apiPrefix = config.get('apiPrefix', { infer: true });
   const port = config.get('port', { infer: true });
@@ -124,6 +137,33 @@ async function bootstrap(): Promise<void> {
   logger.log(`API listening on http://localhost:${port}/${apiPrefix}`);
   if (!isProduction) logger.log(`API docs at http://localhost:${port}/${apiPrefix}/docs`);
   logger.log(`CORS origins: ${corsOrigins.join(', ')}`);
+
+  // At `debug`, because it is what you want the moment a deployed instance
+  // behaves unlike the one on your machine, and noise on every other day.
+  logger.debug(
+    `node ${process.version} · env ${config.get('env', { infer: true })} · pid ${process.pid}`,
+  );
+
+  /**
+   * Say goodbye on the way out.
+   *
+   * Without this, a container that is scaled down, redeployed or OOM-killed
+   * simply stops appearing in the log, and there is no way afterwards to tell
+   * an orderly shutdown from a crash.
+   */
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.on(signal, () => {
+      logger.log(`${signal} received — shutting down after ${uptime()}`);
+    });
+  }
+
+  process.on('unhandledRejection', (reason) => {
+    logger.error(`Unhandled promise rejection: ${String(reason)}`);
+  });
+}
+
+function uptime(): string {
+  return `${Math.round(process.uptime())}s`;
 }
 
 bootstrap().catch((error) => {

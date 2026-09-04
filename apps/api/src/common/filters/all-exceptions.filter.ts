@@ -15,6 +15,10 @@ import type { Request, Response } from 'express';
  * Two jobs: give the client a stable error envelope it can rely on, and make sure
  * an unexpected failure never leaks a stack trace, a SQL fragment or a column
  * name to the browser. Full detail goes to the log with the request id attached.
+ *
+ * It does not write the access line — `LoggingInterceptor` logs every request
+ * with its status and duration, this one included. What is logged here is the
+ * part the interceptor cannot see: the exception itself, and its stack.
  */
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -31,14 +35,25 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const { status, body } = this.normalise(exception);
 
-    const logLine = `${request.method} ${request.originalUrl} → ${status}`;
+    const where = `${request.method} ${request.originalUrl}`;
+
     if (status >= 500) {
+      // Ours. The stack is the whole point of the line.
       this.logger.error(
-        `${logLine} [${requestId}] ${body.message}`,
+        `${where} failed: ${body.message}`,
         exception instanceof Error ? exception.stack : undefined,
       );
     } else if (status !== 404) {
-      this.logger.warn(`${logLine} [${requestId}] ${body.message}`);
+      /**
+       * Theirs — a validation failure, a permission refusal, a gate.
+       *
+       * Logged at `debug`, not `warn`: the interceptor already records a 4xx as
+       * a warning with the status and the path, so repeating it here would
+       * double every rejected request in the log. What this adds is the
+       * *reason*, which the interceptor has no access to — and that is worth
+       * having available without being on by default.
+       */
+      this.logger.debug(`${where} rejected with ${status}: ${body.message}`);
     }
 
     response.status(status).json({ ...body, requestId });

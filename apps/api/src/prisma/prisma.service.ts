@@ -19,14 +19,27 @@ import { Prisma, PrismaClient } from '@prisma/client';
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
+  /**
+   * Read from `process.env` rather than injected.
+   *
+   * This client is constructed before Nest has finished building the container,
+   * so `ConfigService` is not available yet — and the log subscriptions have to
+   * be declared in the constructor call itself, not attached later. Both values
+   * are in the validated schema (`configuration.ts`), so a typo is still caught
+   * at boot; this only reads them earlier than everything else does.
+   */
+  private readonly logQueries = process.env.PRISMA_LOG_QUERIES === 'true';
+  private readonly slowQueryMs = Number(process.env.SLOW_QUERY_MS ?? 300);
+
   constructor() {
     super({
       log: [
         { emit: 'event', level: 'warn' },
         { emit: 'event', level: 'error' },
-        ...(process.env.PRISMA_LOG_QUERIES === 'true'
-          ? ([{ emit: 'event', level: 'query' }] as const)
-          : []),
+        // Subscribed unconditionally: the slow-query warning needs the event
+        // even when full query logging is off. Nothing is written unless a
+        // statement is actually slow.
+        { emit: 'event', level: 'query' },
       ],
       errorFormat: 'minimal',
     });
@@ -44,13 +57,33 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
     events.$on('warn', (e) => this.logger.warn(e.message));
     events.$on('error', (e) => this.logger.error(e.message));
-    events.$on('query', (e) => this.logger.debug(`${e.duration}ms ${e.query}`));
 
+    /**
+     * Query logging, at two levels.
+     *
+     * Every statement at `debug` when PRISMA_LOG_QUERIES is on — that is the
+     * N+1 hunt, and it is deliberately opt-in because query parameters contain
+     * personal data.
+     *
+     * A slow one at `warn` regardless. That is the line worth having on by
+     * default: it turns "the app feels slow sometimes" into a specific
+     * statement and a duration, and it costs nothing on a healthy system
+     * because a healthy system does not emit it.
+     */
+    events.$on('query', (e) => {
+      if (this.logQueries) this.logger.debug(`${e.duration}ms ${e.query}`);
+      if (e.duration >= this.slowQueryMs) {
+        this.logger.warn(`Slow query: ${e.duration}ms — ${truncate(e.query)}`);
+      }
+    });
+
+    const started = Date.now();
     await this.$connect();
-    this.logger.log('Database connection established');
+    this.logger.log(`Database connection established in ${Date.now() - started}ms`);
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.logger.log('Closing the database connection pool');
     await this.$disconnect();
   }
 
@@ -77,4 +110,9 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     const list = tables.map((t) => `"public"."${t.tablename}"`).join(', ');
     if (list) await this.$executeRawUnsafe(`TRUNCATE TABLE ${list} CASCADE;`);
   }
+}
+
+/** Keeps one pathological statement from filling a log line with 40kB of SQL. */
+function truncate(sql: string, max = 300): string {
+  return sql.length > max ? `${sql.slice(0, max)}…` : sql;
 }

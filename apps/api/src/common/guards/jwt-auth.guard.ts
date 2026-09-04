@@ -36,7 +36,10 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
        * an email address in a log is personal data sitting somewhere with a
        * long retention and loose access.
        */
-      const principal = user as AuthenticatedUser;
+      // Through `unknown`, because `TUser` is Passport's open generic and TS
+      // will not narrow it directly. JwtStrategy is the only thing that
+      // populates it, and it returns exactly this shape.
+      const principal = user as unknown as AuthenticatedUser;
       enrichRequestContext({
         userId: principal.id,
         organisationId: principal.organisationId,
