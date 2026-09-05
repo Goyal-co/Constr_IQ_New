@@ -78,27 +78,24 @@ export const envSchema = z
     LOGIN_LOCKOUT_MINUTES: z.coerce.number().int().min(1).default(15),
 
     /**
-     * `local` by default. S3 is the better production answer for attachments,
-     * but defaulting to it made the API refuse to boot without credentials for
-     * a feature many deployments never touch. Opt in by setting this to `s3`.
+     * Attachments are written to the local filesystem.
+     *
+     * The S3 driver and its seven variables were removed — nothing could reach
+     * them, because the web client has no upload control. See
+     * infra/storage/storage.service.ts, which also records what has to come
+     * back before an upload UI is built.
      */
-    STORAGE_DRIVER: z.enum(['s3', 'local']).default('local'),
-    S3_ENDPOINT: z.string().optional(),
-    S3_REGION: z.string().default('us-east-1'),
-    S3_BUCKET: z.string().default('ciq-attachments'),
-    S3_ACCESS_KEY_ID: z.string().optional(),
-    S3_SECRET_ACCESS_KEY: z.string().optional(),
-    S3_FORCE_PATH_STYLE: bool.default('true'),
-    S3_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     MAX_UPLOAD_MB: z.coerce.number().int().positive().default(25),
     LOCAL_UPLOAD_DIR: z.string().default('./uploads'),
 
     /**
-     * `brevo` posts to Brevo's HTTP API with a v3 key. `smtp` speaks SMTP to any
-     * relay. They are separate because Brevo's SMTP relay does not accept a v3
-     * API key — it needs the distinct login and SMTP key from the SMTP tab.
+     * `brevo` posts to Brevo's HTTP API with a v3 key; `log` writes the subject
+     * and recipients to the log and sends nothing.
+     *
+     * The `smtp` driver and its five variables were removed — this deployment
+     * sends through Brevo's HTTP API, and nothing used the relay.
      */
-    MAIL_DRIVER: z.enum(['brevo', 'smtp', 'log']).default('log'),
+    MAIL_DRIVER: z.enum(['brevo', 'log']).default('log'),
 
     /** The `xkeysib-…` key from Brevo → SMTP & API → API Keys. */
     BREVO_API_KEY: z.string().optional(),
@@ -116,12 +113,6 @@ export const envSchema = z
      */
     EMAIL_FROM: z.string().default(PLACEHOLDER_SENDER),
     EMAIL_FROM_NAME: z.string().default('ConstructIQ Tracker'),
-
-    SMTP_HOST: z.string().default('localhost'),
-    SMTP_PORT: z.coerce.number().int().positive().default(1025),
-    SMTP_SECURE: bool.default('false'),
-    SMTP_USER: z.string().optional(),
-    SMTP_PASSWORD: z.string().optional(),
 
     ENABLE_SCHEDULER: bool.default('true'),
     DIGEST_CRON: z.string().default('0 3 * * 1'),
@@ -178,24 +169,6 @@ export const envSchema = z
 
     // The legacy MAIL_FROM / MAIL_FROM_NAME names are adopted before validation
     // rather than rejected here — see `adoptLegacyNames` below for why.
-    // A v3 key pasted into the SMTP password is the most likely way to configure
-    // this wrong, and it fails with an opaque 535 from the relay.
-    if (env.MAIL_DRIVER === 'smtp' && env.SMTP_PASSWORD?.startsWith('xkeysib-')) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['SMTP_PASSWORD'],
-        message:
-          'That is a Brevo v3 API key, which the SMTP relay rejects. Either set MAIL_DRIVER=brevo ' +
-          'and move it to BREVO_API_KEY, or use the SMTP key from Brevo → SMTP & API → SMTP.',
-      });
-    }
-    if (env.STORAGE_DRIVER === 's3' && (!env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['S3_ACCESS_KEY_ID'],
-        message: 'S3 credentials are required when STORAGE_DRIVER=s3',
-      });
-    }
   });
 
 export type Env = z.infer<typeof envSchema>;
@@ -227,6 +200,17 @@ function adoptLegacyNames(raw: Record<string, unknown>): string[] {
       warnings.push(`${legacy} is deprecated — rename it to ${current}.`);
     }
   }
+
+  /**
+   * `info` is accepted as a synonym for `log`.
+   *
+   * Nest calls this level `log`; every other logging library in common use
+   * calls it `info`, so `LOG_LEVEL=info` is what somebody writes from memory —
+   * and it refused to boot with an enum error. Refusing a deployment over a
+   * synonym for the level name is not a useful thing for this to do.
+   */
+  if (raw.LOG_LEVEL === 'info') raw.LOG_LEVEL = 'log';
+
   return warnings;
 }
 
@@ -287,14 +271,6 @@ export function buildConfig(env: Env) {
       lockoutMinutes: env.LOGIN_LOCKOUT_MINUTES,
     },
     storage: {
-      driver: env.STORAGE_DRIVER,
-      endpoint: env.S3_ENDPOINT,
-      region: env.S3_REGION,
-      bucket: env.S3_BUCKET,
-      accessKeyId: env.S3_ACCESS_KEY_ID,
-      secretAccessKey: env.S3_SECRET_ACCESS_KEY,
-      forcePathStyle: env.S3_FORCE_PATH_STYLE,
-      signedUrlTtlSeconds: env.S3_SIGNED_URL_TTL_SECONDS,
       maxUploadBytes: env.MAX_UPLOAD_MB * 1024 * 1024,
       localDir: env.LOCAL_UPLOAD_DIR,
     },
@@ -303,11 +279,6 @@ export function buildConfig(env: Env) {
       brevoApiKey: env.BREVO_API_KEY,
       from: env.EMAIL_FROM,
       fromName: env.EMAIL_FROM_NAME,
-      host: env.SMTP_HOST,
-      port: env.SMTP_PORT,
-      secure: env.SMTP_SECURE,
-      user: env.SMTP_USER,
-      password: env.SMTP_PASSWORD,
     },
     scheduler: {
       enabled: env.ENABLE_SCHEDULER,

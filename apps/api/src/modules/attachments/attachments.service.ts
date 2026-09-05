@@ -82,7 +82,7 @@ export class AttachmentsService {
         entityId: row.entityId,
         uploadedBy: toUserSummary(row.uploadedBy),
         uploadedAt: row.createdAt.toISOString(),
-        downloadUrl: await this.storage.signedUrl(row.storageKey, row.fileName),
+        downloadUrl: await this.storage.signedUrl(row.storageKey),
       })),
     );
   }
@@ -166,7 +166,7 @@ export class AttachmentsService {
       entityId: attachment.entityId,
       uploadedBy: toUserSummary(attachment.uploadedBy),
       uploadedAt: attachment.createdAt.toISOString(),
-      downloadUrl: await this.storage.signedUrl(attachment.storageKey, attachment.fileName),
+      downloadUrl: await this.storage.signedUrl(attachment.storageKey),
     };
   }
 

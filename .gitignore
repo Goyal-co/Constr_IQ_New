@@ -5,6 +5,7 @@ dist-seed/
 build/
 coverage/
 .env
+.env.example
 .env.local
 .env.*.local
 *.log

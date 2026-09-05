@@ -1,7 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
-import type { Transporter } from 'nodemailer';
 import type { AppConfig } from '../../config/configuration';
 
 export interface MailMessage {
@@ -16,27 +14,27 @@ const BREVO_ENDPOINT = 'https://api.brevo.com/v3/smtp/email';
 /**
  * Outbound email.
  *
- * Three drivers behind one `send()`:
+ * Two drivers behind one `send()`:
  *
- *   log    — writes the message to the application log. The default, so a
- *            deployment sends nothing until somebody opts in.
+ *   log    — writes the subject and recipients to the application log and sends
+ *            nothing. The default, so a deployment is silent until somebody
+ *            opts in.
  *   brevo  — Brevo's HTTP API. Takes the `xkeysib-…` key from the API Keys page.
- *   smtp   — any SMTP relay, including Brevo's own.
  *
- * `brevo` and `smtp` are separate on purpose rather than one "Brevo" option:
- * Brevo's SMTP relay does NOT accept a v3 API key. It wants the distinct login
- * and SMTP key from the SMTP tab, which is a different credential pair that
- * people routinely confuse. Splitting the drivers means whichever credential you
- * hold, exactly one setting matches it.
+ * There was a third, `smtp`, speaking to any relay including Brevo's own. It
+ * was removed because this deployment sends through Brevo's HTTP API and
+ * nothing used it — it cost five environment variables, a mailpit container in
+ * the development stack, and a standing trap: Brevo's SMTP relay does not
+ * accept a v3 API key, it wants the separate login and SMTP key from the SMTP
+ * tab, and pasting the wrong one produced an opaque 535.
  *
- * The HTTP driver is also the better choice on most container hosts, which block
- * outbound 587/465 — an SMTP send there fails by hanging until it times out,
- * which looks like a hung digest job rather than a configuration problem.
+ * HTTP is also the better fit for a container host. Many block outbound 587 and
+ * 465, and an SMTP send there fails by hanging until it times out — which looks
+ * like a stuck digest job rather than a configuration problem.
  */
 @Injectable()
 export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
-  private transporter?: Transporter;
 
   constructor(private readonly config: ConfigService<AppConfig, true>) {}
 
@@ -45,26 +43,11 @@ export class MailService implements OnModuleInit {
   }
 
   onModuleInit(): void {
-    switch (this.settings.driver) {
-      case 'log':
-        this.logger.warn('MAIL_DRIVER=log — messages will be written to the log, not sent.');
-        return;
-
-      case 'brevo':
-        this.logger.log(`Sending mail through the Brevo API as ${this.settings.from}`);
-        return;
-
-      case 'smtp':
-        this.transporter = nodemailer.createTransport({
-          host: this.settings.host,
-          port: this.settings.port,
-          secure: this.settings.secure,
-          ...(this.settings.user
-            ? { auth: { user: this.settings.user, pass: this.settings.password } }
-            : {}),
-        });
-        return;
+    if (this.settings.driver === 'log') {
+      this.logger.warn('MAIL_DRIVER=log — messages will be written to the log, not sent.');
+      return;
     }
+    this.logger.log(`Sending mail through the Brevo API as ${this.settings.from}`);
   }
 
   /**
@@ -97,24 +80,13 @@ export class MailService implements OnModuleInit {
     try {
       this.logger.debug(`Sending "${message.subject}" to ${recipients.length} recipient(s)`);
 
-      if (this.settings.driver === 'brevo') {
-        await this.sendViaBrevo(recipients, message);
-      } else {
-        await this.transporter?.sendMail({
-          from: this.settings.from,
-          to: joined,
-          subject: message.subject,
-          html: message.html,
-          text: message.text ?? stripHtml(message.html),
-        });
-      }
+      await this.sendViaBrevo(recipients, message);
 
       // The success, not only the failure. A digest nobody received is usually
       // reported as "the email never arrived", and this line is what separates
       // "we never sent it" from "we sent it and the relay dropped it".
       this.logger.log({
         message: `Sent "${message.subject}" to ${joined}`,
-        driver: this.settings.driver,
         recipients: recipients.length,
         durationMs: Date.now() - started,
       });
@@ -182,13 +154,7 @@ export class MailService implements OnModuleInit {
       }
     }
 
-    if (!this.transporter) return true;
-    try {
-      await this.transporter.verify();
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 

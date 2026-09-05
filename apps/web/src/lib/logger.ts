@@ -40,17 +40,28 @@ function isLevel(value: unknown): value is LogLevel {
   return typeof value === 'string' && (ORDER as string[]).includes(value);
 }
 
+/**
+ * `info` means `log`, matching the API.
+ *
+ * Nest names this level `log`; almost everything else names it `info`. Accepting
+ * both means one LOG_LEVEL value can be pasted into both halves of the stack
+ * and mean the same thing, which is the whole point of the names matching.
+ */
+function normalise(value: unknown): unknown {
+  return value === 'info' ? 'log' : value;
+}
+
 function resolveLevel(): LogLevel {
   // The per-browser override wins, so support can raise the level on one
   // machine without touching the deployment.
   try {
-    const stored = localStorage.getItem(LEVEL_KEY);
+    const stored = normalise(localStorage.getItem(LEVEL_KEY));
     if (isLevel(stored)) return stored;
   } catch {
     // Private mode, or storage disabled. Fall through to the build-time value.
   }
 
-  const configured = import.meta.env.VITE_LOG_LEVEL;
+  const configured = normalise(import.meta.env.VITE_LOG_LEVEL);
   if (isLevel(configured)) return configured;
 
   return import.meta.env.PROD ? 'warn' : 'debug';
