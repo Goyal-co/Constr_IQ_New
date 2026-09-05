@@ -35,6 +35,21 @@ server {
         return 200 "ok\n";
     }
 
+    # ---- Runtime configuration --------------------------------------------
+    # Generated from the container's environment, not from a file in the image.
+    #
+    # This is the one value that has to be changeable without a rebuild: it is
+    # the address of the API, and the API moves. `envsubst` fills ${VITE_API_URL}
+    # in when the container starts, so repointing the app is
+    # `-e VITE_API_URL=... ` and a restart.
+    #
+    # Never cached — a stale copy would send the app to the previous API.
+    location = /config.js {
+        default_type application/javascript;
+        add_header Cache-Control "no-store, must-revalidate" always;
+        return 200 'window.__CIQ_CONFIG__ = { apiUrl: "${VITE_API_URL}" };';
+    }
+
     # ---- Caching ----------------------------------------------------------
     # Content-hashed filenames, so they can be cached forever.
     #

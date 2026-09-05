@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="description" content="Project, drawing, procurement and execution tracking for interior fit-out delivery." />
+    <meta
+      name="description"
+      content="Project, drawing, procurement and execution tracking for interior fit-out delivery."
+    />
     <meta name="color-scheme" content="light dark" />
     <!-- Tints the browser chrome on mobile to match the app surface. -->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8fa" />
@@ -30,6 +33,22 @@
         }
       })();
     </script>
+    <!--
+      Runtime configuration, served by the web container and substituted from its
+      environment at start-up (see apps/web/nginx.conf.template).
+
+      VITE_API_URL is a *build-time* substitution: Vite compiles it into the
+      bundle, so changing it on a running container does nothing and the only way
+      to repoint the app is a rebuild. This file lets the container answer the
+      question at start-up instead, which is what makes moving the API a restart
+      rather than a rebuild.
+
+      Deliberately not `defer`/`async`: it must run before the bundle reads it.
+      On a static host (Vercel) there is no container to generate it, the request
+      404s, the global stays undefined and the compiled-in value is used — which
+      is correct there, because that host rebuilds on every deploy.
+    -->
+    <script src="/config.js"></script>
   </head>
   <body>
     <div id="root"></div>

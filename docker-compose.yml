@@ -100,5 +100,9 @@ services:
         condition: service_healthy
     environment:
       PORT: ${WEB_CONTAINER_PORT}
+      # Read at container START-UP and served as /config.js, so repointing the
+      # app at a different API is a restart rather than an image rebuild. The
+      # build arg above only sets the fallback compiled into the bundle.
+      VITE_API_URL: ${VITE_API_URL}
     ports:
       - '${WEB_HOST_PORT}:${WEB_CONTAINER_PORT}'
