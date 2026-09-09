@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -11,10 +12,12 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
+  applyTemplateSchema,
   createProjectSchema,
   projectQuerySchema,
   reorderSchema,
   updateProjectSchema,
+  type ApplyTemplateDto,
   type CreateProjectDto,
   type ProjectQueryDto,
   type ReorderDto,
@@ -83,6 +86,33 @@ export class ProjectsController {
     @ClientInfo() client: ClientMeta,
   ) {
     return this.projects.update(actor, id, dto, client);
+  }
+
+  /**
+   * Apply a template to a project that already exists.
+   *
+   * `project:update` rather than `project:create`: this changes a project
+   * somebody already has, and the people allowed to edit one are the people who
+   * should be allowed to add scope to it.
+   *
+   * The service appends — existing drawings, activities and materials are left
+   * untouched — so this is the recovery path for a project created without a
+   * template, and equally for adding a second template's worth of scope later.
+   */
+  @Post(':id/apply-template')
+  // 200, not Nest's default 201: nothing is created at a new URL. This mutates
+  // a project that already exists and returns it, which is the same shape as
+  // the auth and scheduler POSTs that also override the status.
+  @HttpCode(200)
+  @RequirePermissions('project:update')
+  @ApiOperation({ summary: 'Seed an existing project from a template, appending to its lists' })
+  applyTemplate(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(zodBody(applyTemplateSchema)) dto: ApplyTemplateDto,
+    @ClientInfo() client: ClientMeta,
+  ) {
+    return this.projects.applyTemplate(actor, id, dto, client);
   }
 
   @Post(':id/restore')

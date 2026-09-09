@@ -64,7 +64,18 @@ export function useReorderable<T extends { id: string }>({
       // should not.
       if (event.button !== 0) return;
       event.preventDefault();
-      (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+
+      /**
+       * `preventDefault` above stops the browser selecting text mid-drag, but it
+       * also suppresses the focus a mousedown would normally give the handle —
+       * so after clicking one, Alt+Arrow went to `document.body` and did
+       * nothing. The handle advertises that shortcut in its own aria-label, so
+       * it has to work for the person who just pressed it, not only for
+       * somebody who arrived by Tab.
+       */
+      const handle = event.currentTarget as HTMLElement;
+      handle.focus();
+      handle.setPointerCapture?.(event.pointerId);
 
       const row = (event.currentTarget as HTMLElement).closest('tr, [data-reorder-row]');
       const container = row?.parentElement;

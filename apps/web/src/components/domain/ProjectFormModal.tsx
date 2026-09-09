@@ -14,11 +14,12 @@ import {
   useCategories,
   useCreateCategory,
   useCreateProject,
+  useApplyTemplate,
   useTemplates,
   useUpdateProject,
   useUsers,
 } from '@/lib/queries';
-import { Button, Callout, Field, Modal, useToast } from '@/components/ui';
+import { Button, Callout, Checkbox, Field, Modal, useToast } from '@/components/ui';
 import { IconX } from '@/components/ui/Icons';
 
 /** Sentinel for the "create one" option in the category select. */
@@ -406,7 +407,9 @@ export function ProjectFormModal({
           {(props) => <input {...props} {...register('siteAddress')} className="input" />}
         </Field>
 
-        {!isEdit && (
+        {isEdit ? (
+          <ApplyTemplateField projectId={project!.id} />
+        ) : (
           <Field
             label="Template"
             error={messageOf(errors.templateId)}
@@ -442,5 +445,124 @@ export function ProjectFormModal({
         </Field>
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Applies a template to a project that already exists.
+ *
+ * A separate control with its own button, rather than a field that "Save
+ * changes" would pick up, because it is a different kind of operation. Saving
+ * edits a handful of fields on one row; this inserts however many drawings,
+ * activities and materials the template describes, and there is no undo for
+ * that beyond deleting them one at a time. An action with consequences of that
+ * size should be something you press deliberately.
+ *
+ * It APPENDS. Nothing already on the project is replaced or removed, so running
+ * it on a project that already has scope adds to it rather than resetting it —
+ * which is what makes it safe to offer here at all.
+ */
+function ApplyTemplateField({ projectId }: { projectId: string }) {
+  const toast = useToast();
+  const templates = useTemplates();
+  const applyTemplate = useApplyTemplate(projectId);
+
+  const [templateId, setTemplateId] = useState('');
+  const [seedPlannedDates, setSeedPlannedDates] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+
+  const chosen = templates.data?.find((template) => template.id === templateId);
+
+  if (!templates.data?.length) {
+    return (
+      <Field label="Template" hint="Build one in Settings → Templates, then apply it here.">
+        {() => <p className="text-sm text-tertiary">You have no templates yet.</p>}
+      </Field>
+    );
+  }
+
+  const apply = async () => {
+    try {
+      await applyTemplate.mutateAsync({ templateId, seedPlannedDates });
+      toast.success(
+        `Applied ${chosen?.name}`,
+        `${chosen?.itemCount} items were added to this project.`,
+      );
+      setTemplateId('');
+      setConfirming(false);
+    } catch (error) {
+      toast.error(
+        'Could not apply the template',
+        error instanceof ApiRequestError ? error.message : undefined,
+      );
+    }
+  };
+
+  return (
+    <Field
+      label="Apply a template"
+      hint="Adds the template's drawings, activities and materials. Nothing already on the project is changed or removed."
+    >
+      {() => (
+        <div className="stack gap-2">
+          <select
+            className="select"
+            aria-label="Template to apply"
+            value={templateId}
+            onChange={(event) => {
+              setTemplateId(event.target.value);
+              setConfirming(false);
+            }}
+          >
+            <option value="">Choose a template…</option>
+            {templates.data?.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name} ({template.itemCount} items)
+                {template.isDefault ? ' · default' : ''}
+              </option>
+            ))}
+          </select>
+
+          {templateId && (
+            <>
+              {/* `Checkbox` renders its `label` as an aria-label only — it is
+                  built for table cells where the column header names it. Here
+                  there is no header, so the text has to be beside it. */}
+              <label className="row gap-2 text-sm" style={{ cursor: 'pointer' }}>
+                <Checkbox
+                  checked={seedPlannedDates}
+                  onChange={setSeedPlannedDates}
+                  label="Pre-fill planned dates from the handover date"
+                  title="Template offsets are days relative to handover. Without a handover date the items arrive undated."
+                />
+                Pre-fill planned dates from the handover date
+              </label>
+              {confirming ? (
+                <div className="row gap-2 wrap">
+                  <span className="text-sm">
+                    Add {chosen?.itemCount} items from “{chosen?.name}”?
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    loading={applyTemplate.isPending}
+                    onClick={() => void apply()}
+                  >
+                    Yes, add them
+                  </Button>
+                  <Button size="sm" onClick={() => setConfirming(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button size="sm" onClick={() => setConfirming(true)}>
+                  Apply template
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </Field>
   );
 }

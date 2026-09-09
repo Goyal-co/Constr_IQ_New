@@ -15,6 +15,7 @@ import {
   IconAlert,
   IconCheck,
   IconChevronDown,
+  IconEdit,
   IconFilter,
   IconGrip,
   IconInfo,
@@ -960,5 +961,91 @@ export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md'
     >
       {letters || '?'}
     </span>
+  );
+}
+
+/**
+ * A name you can rename in place.
+ *
+ * Renaming was the one thing you could not do to an activity once it existed.
+ * Every other field on a work item, drawing or material was editable from the
+ * row — dates, status, supplier — but a typo in the name meant deleting the row
+ * and rebuilding it, which on a work item also throws away its comments and its
+ * revision history. That is a bad trade for a misspelling.
+ *
+ * Reads as text until you press the pencil, so a dense list stays a dense list;
+ * the control only appears for people who can edit, and only on hover or focus.
+ *
+ * Committing on blur rather than on every keystroke: a PATCH per character
+ * would be a request per character, and the intermediate names are not states
+ * anybody wants saved. Enter commits, Escape abandons.
+ */
+export function EditableName({
+  value,
+  onRename,
+  editable = true,
+  strikethrough,
+  children,
+}: {
+  value: string;
+  onRename: (name: string) => void;
+  editable?: boolean;
+  /** Completed rows are struck through; the input never is. */
+  strikethrough?: boolean;
+  /** Chips and badges that sit beside the name when it is not being edited. */
+  children?: React.ReactNode;
+}) {
+  const [editing, setEditing] = useState(false);
+
+  if (editing) {
+    return (
+      <input
+        className="input input-sm"
+        style={{ maxWidth: 320 }}
+        aria-label={`Rename ${value}`}
+        defaultValue={value}
+        autoFocus
+        onFocus={(event) => event.currentTarget.select()}
+        onBlur={(event) => {
+          const next = event.target.value.trim();
+          // Unchanged or emptied: treat as abandoned. An empty name would be
+          // rejected by the server anyway, and sending an identical one would
+          // write an audit entry recording a change that did not happen.
+          if (next && next !== value) onRename(next);
+          setEditing(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+          if (event.key === 'Escape') {
+            event.currentTarget.value = value;
+            event.currentTarget.blur();
+          }
+        }}
+      />
+    );
+  }
+
+  return (
+    <>
+      <span
+        style={{
+          textDecoration: strikethrough ? 'line-through' : undefined,
+          color: strikethrough ? 'var(--text-tertiary)' : undefined,
+        }}
+      >
+        {value}
+      </span>
+      {children}
+      {editable && (
+        <button
+          type="button"
+          className="row-action"
+          aria-label={`Rename ${value}`}
+          onClick={() => setEditing(true)}
+        >
+          <IconEdit size={13} />
+        </button>
+      )}
+    </>
   );
 }

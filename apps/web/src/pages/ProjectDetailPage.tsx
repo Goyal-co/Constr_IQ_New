@@ -47,6 +47,7 @@ import {
   ConfirmDialog,
   DeleteButton,
   DragHandle,
+  EditableName,
   EmptyState,
   Kpi,
   Menu,
@@ -590,23 +591,22 @@ function DesignFilesPanel({ project }: { project: ProjectDetail }) {
                       />
                     </td>
                     <td data-label="Document">
-                      <span
-                        style={{
-                          textDecoration: file.isComplete ? 'line-through' : undefined,
-                          color: file.isComplete ? 'var(--text-tertiary)' : undefined,
-                        }}
+                      <EditableName
+                        value={file.name}
+                        editable={canEdit}
+                        strikethrough={file.isComplete}
+                        onRename={(name) => update.mutate({ id: file.id, name })}
                       >
-                        {file.name}
-                      </span>
-                      {/* Only while the row is collapsed on mobile — the Rev
-                          column below carries it everywhere else, and showing
-                          both put the same chip on screen twice. */}
-                      <span
-                        className="rev-chip rev-chip--summary"
-                        data-issued={file.currentRevision > 0}
-                      >
-                        {formatRevision(file.currentRevision)}
-                      </span>
+                        {/* Only while the row is collapsed on mobile — the Rev
+                            column below carries it everywhere else, and showing
+                            both put the same chip on screen twice. */}
+                        <span
+                          className="rev-chip rev-chip--summary"
+                          data-issued={file.currentRevision > 0}
+                        >
+                          {formatRevision(file.currentRevision)}
+                        </span>
+                      </EditableName>
                       <RowToggle expanded={rows.isOpen(file.id)} label={file.name} />
                     </td>
                     <td data-label="Rev">
@@ -936,14 +936,13 @@ function DesignPhasePanel({ project, phase }: { project: ProjectDetail; phase?: 
                       />
                     </td>
                     <td data-summary data-label="Work item">
-                      <span
-                        className="grow truncate"
-                        style={{
-                          textDecoration: item.designComplete ? 'line-through' : undefined,
-                          color: item.designComplete ? 'var(--text-tertiary)' : undefined,
-                        }}
-                      >
-                        {item.name}
+                      <span className="grow truncate">
+                        <EditableName
+                          value={item.name}
+                          editable={canEdit}
+                          strikethrough={item.designComplete}
+                          onRename={(name) => update.mutate({ id: item.id, name })}
+                        />
                       </span>
                       <RowToggle expanded={rows.isOpen(item.id)} label={item.name} />
                     </td>
@@ -1374,7 +1373,13 @@ function MaterialRow({
         )}
       </td>
 
-      <td className="font-medium">{material.name}</td>
+      <td className="font-medium">
+        <EditableName
+          value={material.name}
+          editable={canEdit}
+          onRename={(name) => onUpdate({ name })}
+        />
+      </td>
 
       <td>
         {canEdit ? (
@@ -1883,7 +1888,13 @@ function ExecutionPhasePanel({
                         />
                       )}
                       <div className="grow" style={{ minWidth: 0 }}>
-                        <div className="font-medium truncate">{item.name}</div>
+                        <div className="font-medium truncate">
+                          <EditableName
+                            value={item.name}
+                            editable={canEdit}
+                            onRename={(name) => update.mutate({ id: item.id, name })}
+                          />
+                        </div>
                         {isBlocked && (
                           <div className="text-2xs" style={{ color: 'var(--danger-text)' }}>
                             {item.gate.reasons.join(' · ')}

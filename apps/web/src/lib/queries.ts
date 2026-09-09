@@ -33,6 +33,7 @@ import type {
   UpdateDesignFileDto,
   UpdateMaterialDto,
   UpdatePhaseDto,
+  ApplyTemplateDto,
   UpdateProjectDto,
   UpdateUserDto,
   UpdateWorkItemDto,
@@ -321,6 +322,24 @@ export const useCreateProject = () =>
 export const useUpdateProject = (projectId: string) =>
   useProjectMutation(
     (dto: UpdateProjectDto) => api.patch<ProjectDetail>(`/projects/${projectId}`, dto),
+    projectId,
+  );
+
+/**
+ * Seed an existing project from a template.
+ *
+ * Appends: the server leaves current drawings, activities and materials alone.
+ * That makes it safe on a project somebody created without picking a template,
+ * and equally for adding a second template's worth of scope to a live project.
+ *
+ * Not optimistic. The server decides how many rows a template produces and what
+ * dates they take from the handover offsets, so there is nothing honest to
+ * predict here — the refetch is the answer.
+ */
+export const useApplyTemplate = (projectId: string) =>
+  useProjectMutation(
+    (dto: ApplyTemplateDto) =>
+      api.post<ProjectDetail>(`/projects/${projectId}/apply-template`, dto),
     projectId,
   );
 

@@ -14,6 +14,7 @@ import {
   type TemplateItemKind,
 } from '@ciq/shared';
 import { useAuth } from '@/lib/auth';
+import { useReorderable } from '@/lib/useReorderable';
 import {
   useCategories,
   useCreateCategory,
@@ -40,6 +41,7 @@ import {
   Card,
   ConfirmDialog,
   EmptyState,
+  DragHandle,
   Field,
   SkeletonRows,
   Switch,
@@ -51,6 +53,8 @@ import {
   IconSettings,
   IconTag,
   IconTemplate,
+  IconCheck,
+  IconEdit,
   IconTrash,
 } from '@/components/ui/Icons';
 import { PageHeader } from '@/components/domain';
@@ -959,6 +963,17 @@ function TemplatesPanel() {
 }
 
 interface DraftItem {
+  /**
+   * Client-side only, and the reason it exists is dragging.
+   *
+   * Template items are saved by replacing the whole list, so the server never
+   * sees this and rows have no id of their own until they are saved. Keying the
+   * list by array index worked while the only operations were append and
+   * remove; the moment two rows can swap places, an index key tells React the
+   * row's *contents* changed rather than its position, which throws away the
+   * DOM node mid-drag and loses focus in an open name field.
+   */
+  uid: string;
   kind: TemplateItemKind;
   /** Null for DESIGN_FILE — a document belongs to no work phase. */
   phaseId: string | null;
@@ -966,6 +981,34 @@ interface DraftItem {
   leadTimeWeeks: number | null;
   offsetStartDays: number | null;
   offsetEndDays: number | null;
+}
+
+/** Adds the client-side id, and strips it again on the way to the server. */
+function toDraft(item: TemplateDetail['items'][number]): DraftItem {
+  return {
+    uid: crypto.randomUUID(),
+    kind: item.kind,
+    phaseId: item.phase?.id ?? null,
+    name: item.name,
+    leadTimeWeeks: item.leadTimeWeeks,
+    offsetStartDays: item.offsetStartDays,
+    offsetEndDays: item.offsetEndDays,
+  };
+}
+
+/** The wire shape: everything except `uid`. */
+function toPayload({ uid: _uid, ...item }: DraftItem) {
+  return item;
+}
+
+/**
+ * What `dirty` and the save compare on.
+ *
+ * `uid` is regenerated on every load, so it can never take part in an equality
+ * check — including it would mark a freshly opened template as unsaved.
+ */
+function comparable(items: DraftItem[]): string {
+  return JSON.stringify(items.map(toPayload));
 }
 
 function TemplateEditor({
@@ -984,32 +1027,12 @@ function TemplateEditor({
   const toast = useToast();
   const setItems = useSetTemplateItems();
 
-  const [items, setLocalItems] = useState<DraftItem[]>(() =>
-    template.items.map((item) => ({
-      kind: item.kind,
-      phaseId: item.phase?.id ?? null,
-      name: item.name,
-      leadTimeWeeks: item.leadTimeWeeks,
-      offsetStartDays: item.offsetStartDays,
-      offsetEndDays: item.offsetEndDays,
-    })),
-  );
+  const [items, setLocalItems] = useState<DraftItem[]>(() => template.items.map(toDraft));
   const [kind, setKind] = useState<TemplateItemKind>('DESIGN_FILE');
   const [draft, setDraft] = useState('');
   const [draftPhase, setDraftPhase] = useState(phases[0]?.id ?? '');
 
-  const dirty =
-    JSON.stringify(items) !==
-    JSON.stringify(
-      template.items.map((item) => ({
-        kind: item.kind,
-        phaseId: item.phase?.id ?? null,
-        name: item.name,
-        leadTimeWeeks: item.leadTimeWeeks,
-        offsetStartDays: item.offsetStartDays,
-        offsetEndDays: item.offsetEndDays,
-      })),
-    );
+  const dirty = comparable(items) !== comparable(template.items.map(toDraft));
 
   const grouped = TEMPLATE_ITEM_KINDS.map((itemKind) => ({
     kind: itemKind,
@@ -1035,55 +1058,22 @@ function TemplateEditor({
     >
       <div className="stack gap-5">
         {grouped.map(({ kind: itemKind, rows }) => (
-          <div key={itemKind}>
-            <div className="eyebrow" style={{ marginBottom: 'var(--space-2)' }}>
-              {TEMPLATE_ITEM_KIND_PLURALS[itemKind]} · {rows.length}
-            </div>
-            {rows.length === 0 ? (
-              <p className="text-sm text-tertiary">None yet.</p>
-            ) : (
-              <div className="checklist">
-                {rows.map((item) => {
-                  const index = items.indexOf(item);
-                  const phase = phases.find((p) => p.id === item.phaseId);
-                  return (
-                    <div key={`${itemKind}-${index}`} className="check-row">
-                      <span
-                        className="phase-swatch"
-                        style={{ background: phase?.colour ?? 'var(--neutral-solid)' }}
-                      />
-                      <span className="check-row-name">{item.name}</span>
-                      {itemKind === 'MATERIAL' && (
-                        <span className="text-2xs text-tertiary shrink-0">
-                          {item.leadTimeWeeks ?? '—'}w lead
-                        </span>
-                      )}
-                      {itemKind === 'WORK_ITEM' && (
-                        <span className="text-2xs text-tertiary shrink-0">
-                          {item.offsetStartDays ?? '—'} → {item.offsetEndDays ?? '—'} days
-                        </span>
-                      )}
-                      <span className="text-2xs text-tertiary shrink-0">
-                        {phase?.name ?? 'No phase'}
-                      </span>
-                      {editable && (
-                        <button
-                          type="button"
-                          className="row-action"
-                          aria-label={`Remove ${item.name}`}
-                          onClick={() =>
-                            setLocalItems((current) => current.filter((_, i) => i !== index))
-                          }
-                        >
-                          <IconTrash size={13} />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <TemplateItemGroup
+            key={itemKind}
+            kind={itemKind}
+            rows={rows}
+            phases={phases}
+            editable={editable}
+            onReorder={(orderedUids) =>
+              setLocalItems((current) => reorderWithin(current, itemKind, orderedUids))
+            }
+            onChange={(uid, patch) =>
+              setLocalItems((current) =>
+                current.map((row) => (row.uid === uid ? { ...row, ...patch } : row)),
+              )
+            }
+            onRemove={(uid) => setLocalItems((current) => current.filter((row) => row.uid !== uid))}
+          />
         ))}
 
         {editable && (
@@ -1098,6 +1088,7 @@ function TemplateEditor({
               setLocalItems((current) => [
                 ...current,
                 {
+                  uid: crypto.randomUUID(),
                   kind,
                   phaseId: kind === 'DESIGN_FILE' ? null : draftPhase,
                   name: draft.trim(),
@@ -1159,7 +1150,9 @@ function TemplateEditor({
               loading={setItems.isPending}
               onClick={() =>
                 setItems.mutate(
-                  { id: template.id, items },
+                  // `toPayload` drops the client-side uid. Zod would strip it
+                  // anyway, but relying on that makes the wire shape accidental.
+                  { id: template.id, items: items.map(toPayload) },
                   {
                     onSuccess: () => toast.success('Template saved'),
                     onError: (error) =>
@@ -1173,25 +1166,226 @@ function TemplateEditor({
             >
               Save template
             </Button>
-            <Button
-              onClick={() =>
-                setLocalItems(
-                  template.items.map((item) => ({
-                    kind: item.kind,
-                    phaseId: item.phase?.id ?? null,
-                    name: item.name,
-                    leadTimeWeeks: item.leadTimeWeeks,
-                    offsetStartDays: item.offsetStartDays,
-                    offsetEndDays: item.offsetEndDays,
-                  })),
-                )
-              }
-            >
-              Discard
-            </Button>
+            <Button onClick={() => setLocalItems(template.items.map(toDraft))}>Discard</Button>
           </div>
         )}
       </div>
     </Card>
+  );
+}
+
+/**
+ * Moves one kind's rows into a new order, leaving the other kinds alone.
+ *
+ * The draft list is flat but rendered in three groups, and the server assigns
+ * `position` per kind — so a reorder only ever needs to permute one kind's
+ * entries. Rebuilding the flat list by walking it and dealing out the reordered
+ * ids in sequence keeps every other row at its original index, which matters
+ * because the groups are interleaved in the array rather than contiguous.
+ */
+function reorderWithin(
+  items: DraftItem[],
+  kind: TemplateItemKind,
+  orderedUids: string[],
+): DraftItem[] {
+  const queue = orderedUids
+    .map((uid) => items.find((item) => item.uid === uid))
+    .filter((item): item is DraftItem => Boolean(item));
+  let next = 0;
+  return items.map((item) => (item.kind === kind ? (queue[next++] ?? item) : item));
+}
+
+/**
+ * One kind's worth of template rows: draggable to reorder, editable in place.
+ *
+ * Its own component because `useReorderable` measures row midpoints from the
+ * DOM inside a single container, so each group needs its own instance — three
+ * hooks in the parent would all measure the same element and fight over it.
+ *
+ * Reordering is local. Template items are saved by replacing the whole list, so
+ * a drag rewrites the draft array and lands with "Save template" alongside
+ * every other edit: no request per drag, and a drag you did not mean is undone
+ * by Discard like anything else.
+ */
+function TemplateItemGroup({
+  kind,
+  rows,
+  phases,
+  editable,
+  onReorder,
+  onChange,
+  onRemove,
+}: {
+  kind: TemplateItemKind;
+  rows: DraftItem[];
+  phases: Phase[];
+  editable: boolean;
+  onReorder: (orderedUids: string[]) => void;
+  onChange: (uid: string, patch: Partial<DraftItem>) => void;
+  onRemove: (uid: string) => void;
+}) {
+  const reorder = useReorderable({
+    items: rows.map((row) => ({ ...row, id: row.uid })),
+    onCommit: onReorder,
+  });
+
+  /** The row whose fields are open. One at a time — this is a dense list. */
+  const [editing, setEditing] = useState<string | null>(null);
+
+  return (
+    <div>
+      <div className="eyebrow" style={{ marginBottom: 'var(--space-2)' }}>
+        {TEMPLATE_ITEM_KIND_PLURALS[kind]} · {rows.length}
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-tertiary">None yet.</p>
+      ) : (
+        <div className="checklist">
+          {reorder.ordered.map((item) => {
+            const phase = phases.find((p) => p.id === item.phaseId);
+            const isEditing = editing === item.uid;
+
+            return (
+              <div
+                key={item.uid}
+                className="check-row"
+                data-reorder-row
+                data-dragging={reorder.dragId === item.uid || undefined}
+              >
+                {editable && (
+                  <DragHandle
+                    label={item.name}
+                    dragging={reorder.dragId === item.uid}
+                    {...reorder.handleProps(item.uid)}
+                  />
+                )}
+                <span
+                  className="phase-swatch"
+                  style={{ background: phase?.colour ?? 'var(--neutral-solid)' }}
+                />
+
+                {isEditing ? (
+                  <input
+                    className="input input-sm grow"
+                    aria-label={`Name for ${item.name}`}
+                    defaultValue={item.name}
+                    autoFocus
+                    onBlur={(event) => {
+                      const name = event.target.value.trim();
+                      // A cleared field reverts rather than commits: an empty
+                      // name would save as a blank row the server then rejects.
+                      if (name) onChange(item.uid, { name });
+                      setEditing(null);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') event.currentTarget.blur();
+                      if (event.key === 'Escape') {
+                        event.currentTarget.value = item.name;
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                ) : (
+                  <span className="check-row-name">{item.name}</span>
+                )}
+
+                {kind === 'MATERIAL' &&
+                  (isEditing ? (
+                    <input
+                      type="number"
+                      className="input input-sm shrink-0"
+                      style={{ width: 78 }}
+                      aria-label={`Lead time in weeks for ${item.name}`}
+                      min={0}
+                      max={104}
+                      defaultValue={item.leadTimeWeeks ?? ''}
+                      onBlur={(event) =>
+                        onChange(item.uid, {
+                          leadTimeWeeks:
+                            event.target.value === '' ? null : Number(event.target.value),
+                        })
+                      }
+                    />
+                  ) : (
+                    <span className="text-2xs text-tertiary shrink-0">
+                      {item.leadTimeWeeks ?? '—'}w lead
+                    </span>
+                  ))}
+
+                {kind === 'WORK_ITEM' &&
+                  (isEditing ? (
+                    <span className="row gap-1 shrink-0">
+                      {(['offsetStartDays', 'offsetEndDays'] as const).map((field) => (
+                        <input
+                          key={field}
+                          type="number"
+                          className="input input-sm"
+                          style={{ width: 74 }}
+                          aria-label={`${
+                            field === 'offsetStartDays' ? 'Start' : 'End'
+                          } offset in days for ${item.name}`}
+                          defaultValue={item[field] ?? ''}
+                          onBlur={(event) =>
+                            onChange(item.uid, {
+                              [field]:
+                                event.target.value === '' ? null : Number(event.target.value),
+                            })
+                          }
+                        />
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-2xs text-tertiary shrink-0">
+                      {item.offsetStartDays ?? '—'} → {item.offsetEndDays ?? '—'} days
+                    </span>
+                  ))}
+
+                {kind !== 'DESIGN_FILE' &&
+                  (isEditing ? (
+                    <select
+                      className="select select-sm shrink-0"
+                      style={{ width: 130 }}
+                      aria-label={`Phase for ${item.name}`}
+                      value={item.phaseId ?? ''}
+                      onChange={(event) => onChange(item.uid, { phaseId: event.target.value })}
+                    >
+                      {phases.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-2xs text-tertiary shrink-0">
+                      {phase?.name ?? 'No phase'}
+                    </span>
+                  ))}
+
+                {editable && (
+                  <>
+                    <button
+                      type="button"
+                      className="row-action"
+                      aria-label={isEditing ? `Done editing ${item.name}` : `Edit ${item.name}`}
+                      onClick={() => setEditing(isEditing ? null : item.uid)}
+                    >
+                      {isEditing ? <IconCheck size={13} /> : <IconEdit size={13} />}
+                    </button>
+                    <button
+                      type="button"
+                      className="row-action"
+                      aria-label={`Remove ${item.name}`}
+                      onClick={() => onRemove(item.uid)}
+                    >
+                      <IconTrash size={13} />
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
