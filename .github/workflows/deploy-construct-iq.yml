@@ -1,0 +1,209 @@
+# Auto-deploy caller for: Construct IQ (project key: ciq)
+#
+# Copy this file into the Construct IQ app repo as:
+#   .github/workflows/deploy-construct-iq.yml
+#
+# WHAT IT DOES
+#   Triggers "3. Rolling Release" (3_rolling-release.yml) on
+#   dhimanparas20/CI-CD-template automatically when a pull request is merged
+#   into main or master. Direct pushes to main/master never deploy.
+#
+# REQUIRED ON THE APP REPO (one secret, nothing else)
+#   Secret  MAIN_REPO_ACTIONS_TOKEN
+#     Fine-grained PAT scoped to dhimanparas20/CI-CD-template only:
+#       Actions: Read and write
+#       Contents: Read-only
+#       Metadata: Read-only
+#     Settings -> Secrets and variables -> Actions -> Secrets
+#
+#     NOTE: if you store it as an *environment* secret instead of a repository
+#     secret, you must also add `environment: <name>` to the job below,
+#     otherwise the secret will be empty and the run fails.
+#
+#   No repository variables are needed. TARGET_OWNER / TARGET_REPO /
+#   TARGET_WORKFLOW / TARGET_REF and every deployment input are hard-coded in
+#   the job env block below.
+#
+# SECURITY
+#   - Secrets are not passed to pull_request runs from forks, so a PR opened
+#     from a fork can never deploy (it fails with "Missing secret").
+#   - PR title/author are echoed only through env vars, never interpolated into
+#     shell, so they cannot inject commands.
+#   - Branch protection on main/master is what really gates this deploy:
+#     anyone who can merge to main can deploy.
+#
+# TUNING (job env block)
+#   DEPLOY_BUILD     "true"  = build images before rollout (slower, always fresh)
+#                    "false" = rollout already-built images
+#   DEPLOY_SERVICES  ""      = every app service with a build: key
+#                    "app"   = only that service (comma-separate for several)
+#   DEPLOY_TELEGRAM  "yes"   = CI/CD repo sends Telegram deploy alerts
+
+name: Deploy Construct IQ (auto on merge)
+
+run-name: "Deploy ciq · PR #${{ github.event.pull_request.number || 'manual' }} · @${{ github.event.pull_request.merged_by.login || github.actor }}"
+
+on:
+  pull_request:
+    branches: [main, master]
+    types: [closed]
+
+  # Manual / emergency trigger (e.g. rollback). Remove this block if you want
+  # the workflow to fire only when a PR is merged.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: request-deploy-goyal-main-ec2-ciq
+  cancel-in-progress: false
+
+jobs:
+  trigger-main-cicd:
+    name: Trigger main CI/CD deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # A PR closed without merging is ignored; manual runs always proceed.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+
+    env:
+      # ---- Target (hard-coded, no repository variables needed) ----
+      TARGET_OWNER: dhimanparas20
+      TARGET_REPO: CI-CD-template
+      TARGET_WORKFLOW: 3_rolling-release.yml
+      TARGET_REF: main
+
+      # ---- Deployment inputs (must match 3_rolling-release.yml) ----
+      DEPLOY_ENVIRONMENT: goyal-main-ec2
+      DEPLOY_DEPLOYER: Goyal-co
+      DEPLOY_PROJECT: ciq
+      DEPLOY_SERVICES: ""
+      DEPLOY_BUILD: "true"
+      DEPLOY_SUDO: "true"
+      DEPLOY_TELEGRAM: "yes"
+
+    steps:
+      - name: Validate hard-coded deployment config
+        run: |
+          set -Eeuo pipefail
+
+          fail() { echo "::error::$1"; exit 1; }
+
+          case "${DEPLOY_ENVIRONMENT}" in
+            goyal-main-ec2) ;;
+            *) fail "Invalid environment: ${DEPLOY_ENVIRONMENT}" ;;
+          esac
+
+          case "${DEPLOY_DEPLOYER}" in
+            dhimanparas20|Goyal-co) ;;
+            *) fail "Invalid deployer: ${DEPLOY_DEPLOYER}" ;;
+          esac
+
+          case "${DEPLOY_PROJECT}" in
+            all|partnergoyal|titancrm|mstautomation|ciq|booking-inventory) ;;
+            *) fail "Invalid project: ${DEPLOY_PROJECT}" ;;
+          esac
+
+          case "${DEPLOY_BUILD}" in
+            true|false) ;;
+            *) fail "Invalid build value: ${DEPLOY_BUILD}" ;;
+          esac
+
+          case "${DEPLOY_SUDO}" in
+            true|false) ;;
+            *) fail "Invalid sudo value: ${DEPLOY_SUDO}" ;;
+          esac
+
+          case "${DEPLOY_TELEGRAM}" in
+            yes|no) ;;
+            *) fail "Invalid telegram value: ${DEPLOY_TELEGRAM}" ;;
+          esac
+
+          if [ -n "${DEPLOY_SERVICES}" ]; then
+            if ! [[ "${DEPLOY_SERVICES}" =~ ^[a-zA-Z0-9._-]+([[:space:]]*,[[:space:]]*[a-zA-Z0-9._-]+)*$ ]]; then
+              fail "Invalid services format: ${DEPLOY_SERVICES}"
+            fi
+          fi
+
+          echo "Hard-coded deployment config is valid."
+
+      - name: Trigger 3. Rolling Release in main CI/CD repo
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_ACTIONS_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Missing secret: MAIN_REPO_ACTIONS_TOKEN. Add it under Settings -> Secrets and variables -> Actions (repository secret). If it lives in a GitHub Environment, declare that environment on this job."
+            exit 1
+          fi
+
+          echo "Triggering main deployment workflow..."
+          echo "Target repo:      ${TARGET_OWNER}/${TARGET_REPO}"
+          echo "Target workflow:  ${TARGET_WORKFLOW}"
+          echo "Target ref:       ${TARGET_REF}"
+          echo "Environment:      ${DEPLOY_ENVIRONMENT}"
+          echo "Deployer:         ${DEPLOY_DEPLOYER}"
+          echo "Project:          ${DEPLOY_PROJECT}"
+          echo "Services:         ${DEPLOY_SERVICES:-all with build}"
+          echo "Build:            ${DEPLOY_BUILD}"
+          echo "Sudo:             ${DEPLOY_SUDO}"
+          echo "Telegram:         ${DEPLOY_TELEGRAM}"
+
+          # Only the inputs declared by 3_rolling-release.yml are sent.
+          gh api \
+            -X POST \
+            "repos/${TARGET_OWNER}/${TARGET_REPO}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+            -f ref="${TARGET_REF}" \
+            -f inputs[environment]="${DEPLOY_ENVIRONMENT}" \
+            -f inputs[deployer]="${DEPLOY_DEPLOYER}" \
+            -f inputs[project]="${DEPLOY_PROJECT}" \
+            -f inputs[services]="${DEPLOY_SERVICES}" \
+            -f inputs[build]="${DEPLOY_BUILD}" \
+            -f inputs[sudo]="${DEPLOY_SUDO}" \
+            -f inputs[telegram]="${DEPLOY_TELEGRAM}"
+
+          echo "Main CI/CD deployment workflow triggered successfully."
+
+      - name: Deployment request summary
+        if: always()
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
+          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+
+          {
+            echo "## Deployment Request"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Status | \`${{ job.status }}\` |"
+            echo "| Trigger | \`${{ github.event_name }}\` |"
+            PR_CELL="${PR_NUMBER:+[#${PR_NUMBER}](${PR_URL})}"
+            PR_CELL="${PR_CELL:-manual run}"
+            echo "| PR | ${PR_CELL} |"
+            echo "| PR title | ${PR_TITLE:--} |"
+            echo "| Merged by | \`${MERGED_BY:-${GITHUB_ACTOR}}\` |"
+            echo "| Merge commit | \`${MERGE_SHA:--}\` |"
+            echo "| Target | \`${TARGET_OWNER}/${TARGET_REPO}\` @ \`${TARGET_REF}\` |"
+            echo "| Target workflow | \`${TARGET_WORKFLOW}\` |"
+            echo "| Environment | \`${DEPLOY_ENVIRONMENT}\` |"
+            echo "| Deployer | \`${DEPLOY_DEPLOYER}\` |"
+            echo "| Project | \`${DEPLOY_PROJECT}\` |"
+            echo "| Services | \`${DEPLOY_SERVICES:-all with build}\` |"
+            echo "| Build | \`${DEPLOY_BUILD}\` |"
+            echo "| Sudo | \`${DEPLOY_SUDO}\` |"
+            echo "| Telegram | \`${DEPLOY_TELEGRAM}\` |"
+            echo ""
+            echo "Triggered from:"
+            echo ""
+            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo ""
+            echo "Real deploy logs:"
+            echo ""
+            echo "https://github.com/${TARGET_OWNER}/${TARGET_REPO}/actions"
+          } >> "${GITHUB_STEP_SUMMARY}"
