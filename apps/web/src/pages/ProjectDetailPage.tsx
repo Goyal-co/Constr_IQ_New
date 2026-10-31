@@ -148,6 +148,22 @@ export function ProjectDetailPage() {
     (w) => w.plannedStart || w.plannedEnd || w.actualStart || w.actualEnd,
   );
 
+  /**
+   * What the Drawing tab counts.
+   *
+   * The sum of the sub-tabs inside it, not of everything in the project. Once a
+   * phase stops tracking drawings its activities are no longer reachable from
+   * this section, and counting them made the badge disagree with the tabs
+   * directly beneath it — which reads as "something is hidden" rather than
+   * "the number is wrong", and sends somebody looking for rows that are not
+   * missing.
+   *
+   * Read off each item's own phase rather than the organisation's phase list:
+   * that is the same object the sub-tabs filter on, so the two cannot drift.
+   */
+  const drawingCount =
+    project.designFiles.length + project.workItems.filter((w) => w.phase.tracksDrawings).length;
+
   const setSection = (id: SectionId) => {
     const next = new URLSearchParams(params);
     if (id === 'design') next.delete('section');
@@ -366,7 +382,7 @@ export function ProjectDetailPage() {
             {entry.label}
             <span className="tab-count">
               {entry.id === 'design'
-                ? project.designFiles.length + project.workItems.length
+                ? drawingCount
                 : entry.id === 'materials'
                   ? project.materials.length
                   : project.workItems.length}
