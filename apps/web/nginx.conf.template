@@ -50,6 +50,20 @@ server {
         return 200 'window.__CIQ_CONFIG__ = { apiUrl: "${VITE_API_URL}" };';
     }
 
+    # The service worker must never be served stale.
+    #
+    # Browsers already bypass the HTTP cache for the worker script itself —
+    # `updateViaCache` defaults to `imports` — but the default is a property of
+    # the registration, and a future change to it would silently pin every
+    # installed client to this version of the worker with no way to push a new
+    # one. Saying it here makes the guarantee the server's rather than the
+    # client's.
+    location = /sw.js {
+        add_header Cache-Control "no-cache, must-revalidate" always;
+        include /etc/nginx/snippets/security-headers.conf;
+        try_files $uri =404;
+    }
+
     # ---- Caching ----------------------------------------------------------
     # Content-hashed filenames, so they can be cached forever.
     #

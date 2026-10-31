@@ -12,6 +12,7 @@ export function toPhase(row: PrismaPhase, usageCount?: number): Phase {
     colour: row.colour,
     position: row.position,
     isArchived: row.isArchived,
+    tracksDrawings: row.tracksDrawings,
     ...(usageCount !== undefined ? { usageCount } : {}),
   };
 }
@@ -93,6 +94,7 @@ export class PhasesService {
         ...(dto.name !== undefined ? { name: dto.name } : {}),
         ...(dto.colour !== undefined ? { colour: dto.colour } : {}),
         ...(dto.isArchived !== undefined ? { isArchived: dto.isArchived } : {}),
+        ...(dto.tracksDrawings !== undefined ? { tracksDrawings: dto.tracksDrawings } : {}),
       },
     });
 
@@ -103,8 +105,18 @@ export class PhasesService {
       entityType: 'Phase',
       entityId: id,
       entityLabel: phase.name,
-      before: { name: existing.name, colour: existing.colour, isArchived: existing.isArchived },
-      after: { name: phase.name, colour: phase.colour, isArchived: phase.isArchived },
+      before: {
+        name: existing.name,
+        colour: existing.colour,
+        isArchived: existing.isArchived,
+        tracksDrawings: existing.tracksDrawings,
+      },
+      after: {
+        name: phase.name,
+        colour: phase.colour,
+        isArchived: phase.isArchived,
+        tracksDrawings: phase.tracksDrawings,
+      },
       client,
     });
 

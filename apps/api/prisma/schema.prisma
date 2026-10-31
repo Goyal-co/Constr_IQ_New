@@ -266,6 +266,17 @@ model Phase {
   position       Int      @default(0)
   /// Archived phases stay referenced by historic rows but are hidden from pickers.
   isArchived     Boolean  @default(false)
+  /// Whether this phase's activities carry a drawing track.
+  ///
+  /// Not every trade is drawn. Civil and MEP are issued from drawings; a
+  /// finishing phase is usually built to a specification instead, and giving it
+  /// a drawing sub-section asks a site team to tick an issue date that will
+  /// never exist. Off here removes the phase from the Drawing section without
+  /// touching its activities, which keep every execution date they already had.
+  ///
+  /// Defaults to true so existing organisations see no change until somebody
+  /// decides otherwise in Settings.
+  tracksDrawings Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

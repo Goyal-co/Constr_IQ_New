@@ -78,6 +78,13 @@ export interface Phase {
   colour: string;
   position: number;
   isArchived: boolean;
+  /**
+   * Whether this phase's activities carry a drawing track.
+   *
+   * False removes the phase from the Drawing section. Its activities keep
+   * every execution date they have — only the drawing columns go away.
+   */
+  tracksDrawings: boolean;
   /** Populated on the settings screen so a phase in use cannot be deleted silently. */
   usageCount?: number;
 }

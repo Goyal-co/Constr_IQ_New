@@ -1,0 +1,7 @@
+# A login-gated internal tool. There is nothing here for a search engine.
+#
+# Without this file the SPA fallback answered /robots.txt with the app's own
+# HTML and a 200, which a crawler reads as "no rules" and treats as permission
+# to crawl everything. The 1395-byte 200s in the access log were that.
+User-agent: *
+Disallow: /

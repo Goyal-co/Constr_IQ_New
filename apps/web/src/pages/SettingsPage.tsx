@@ -39,6 +39,7 @@ import {
   Button,
   Callout,
   Card,
+  Checkbox,
   ConfirmDialog,
   EmptyState,
   DragHandle,
@@ -441,6 +442,7 @@ function PhasesPanel() {
                   <th>Phase</th>
                   <th>Colour</th>
                   <th className="num">In use by</th>
+                  <th>Drawings</th>
                   <th>Status</th>
                   <th style={{ width: 44 }} />
                 </tr>
@@ -491,6 +493,24 @@ function PhasesPanel() {
                     </td>
                     <td data-label="In use by" className="num text-sm text-secondary">
                       {phase.usageCount ?? 0}
+                    </td>
+                    <td data-label="Drawings">
+                      {/* Off removes this phase from the Drawing section. Its
+                          activities keep every execution date they have — only
+                          the drawing columns go away, so switching it back on
+                          restores them untouched. */}
+                      <label className="row gap-2 text-sm" style={{ cursor: 'pointer' }}>
+                        <Checkbox
+                          checked={phase.tracksDrawings}
+                          disabled={!editable}
+                          onChange={(next) =>
+                            updatePhase.mutate({ id: phase.id, tracksDrawings: next })
+                          }
+                          label={`${phase.name} tracks drawings`}
+                          title="Shows this phase as a tab in the Drawing section."
+                        />
+                        <span className="text-2xs text-tertiary">Tracks drawings</span>
+                      </label>
                     </td>
                     <td data-label="Status">
                       {phase.isArchived ? (

@@ -355,9 +355,9 @@ export class ProjectsService {
       settings,
     );
 
-    await this.prisma.$transaction(async (tx) => {
-      await this.insertTemplateRows(tx, projectId, rows, true);
-    });
+    const added = await this.prisma.$transaction(async (tx) =>
+      this.insertTemplateRows(tx, projectId, rows, true),
+    );
 
     await this.audit.record({
       organisationId: actor.organisationId,
@@ -368,9 +368,13 @@ export class ProjectsService {
       entityLabel: project.name,
       after: {
         templateId: dto.templateId,
-        designFilesAdded: rows.designFiles.length,
-        workItemsAdded: rows.workItems.length,
-        materialsAdded: rows.materials.length,
+        // What was actually inserted, not what the template contained. The two
+        // differ whenever the project already had a row of the same name, and
+        // an audit entry claiming rows that were skipped is worse than useless.
+        designFilesAdded: added.designFiles,
+        workItemsAdded: added.workItems,
+        materialsAdded: added.materials,
+        duplicatesSkipped: added.skipped,
       },
       client,
     });
@@ -463,7 +467,7 @@ export class ProjectsService {
     projectId: string,
     rows: Awaited<ReturnType<ProjectsService['buildTemplateRows']>>,
     append = false,
-  ): Promise<void> {
+  ): Promise<TemplateInsertCounts> {
     // When appending to a live project, continue numbering after what is there.
     const offsets = append
       ? {
@@ -473,39 +477,118 @@ export class ProjectsService {
         }
       : { designFiles: 0, workItems: 0, materials: 0 };
 
-    if (rows.designFiles.length > 0) {
+    /**
+     * What the project already has, so a template cannot add it twice.
+     *
+     * Applying a template to a live project is the recovery path for one
+     * created without a template, but it is also how a second playbook gets
+     * layered onto a running job — and two playbooks overlap. Without this,
+     * every shared row arrived again, and somebody had to find and delete each
+     * duplicate by hand.
+     *
+     * Matching is on the name, trimmed and case-folded, scoped by phase for the
+     * two kinds that have one. Name is what a person actually compares: two
+     * rows called "Ceiling grid" in the same phase are the same activity to
+     * everyone looking at the screen, whatever their ids say.
+     *
+     * Phase belongs in the key. "Snagging" under Civil and "Snagging" under
+     * Finishing are two genuine pieces of work on a programme, and collapsing
+     * them would lose one.
+     *
+     * Only when appending. A fresh project has nothing to collide with, and
+     * these would be three round trips to read zero rows.
+     */
+    const existing = append
+      ? {
+          designFiles: new Set(
+            (await tx.designFile.findMany({ where: { projectId }, select: { name: true } })).map(
+              (row) => rowKey(row.name),
+            ),
+          ),
+          workItems: new Set(
+            (
+              await tx.workItem.findMany({
+                where: { projectId },
+                select: { name: true, phaseId: true },
+              })
+            ).map((row) => rowKey(row.name, row.phaseId)),
+          ),
+          materials: new Set(
+            (
+              await tx.material.findMany({
+                where: { projectId },
+                select: { name: true, phaseId: true },
+              })
+            ).map((row) => rowKey(row.name, row.phaseId)),
+          ),
+        }
+      : {
+          designFiles: new Set<string>(),
+          workItems: new Set<string>(),
+          materials: new Set<string>(),
+        };
+
+    /**
+     * The template's rows are also de-duplicated against each other, not only
+     * against the project. A template can legitimately list the same name
+     * twice — somebody adds it, forgets, adds it again — and inserting both
+     * would reintroduce exactly the problem this is here to prevent.
+     */
+    const designFiles = rows.designFiles.filter((f) => claim(existing.designFiles, rowKey(f.name)));
+    const workItems = rows.workItems.filter((w) =>
+      claim(existing.workItems, rowKey(w.name, w.phaseId)),
+    );
+    const materials = rows.materials.filter((m) =>
+      claim(existing.materials, rowKey(m.name, m.phaseId)),
+    );
+
+    if (designFiles.length > 0) {
       await tx.designFile.createMany({
-        data: rows.designFiles.map((f) => ({
+        data: designFiles.map((f, index) => ({
           projectId,
           name: f.name,
-          position: f.position + offsets.designFiles,
+          // Re-numbered from the filtered list. Keeping the template's own
+          // position would leave a gap wherever a duplicate was skipped, and on
+          // a manually ordered list those gaps show up as jumps.
+          position: index + offsets.designFiles,
         })),
       });
     }
-    if (rows.workItems.length > 0) {
+    if (workItems.length > 0) {
       await tx.workItem.createMany({
-        data: rows.workItems.map((w) => ({
+        data: workItems.map((w, index) => ({
           projectId,
           phaseId: w.phaseId,
           name: w.name,
-          position: w.position + offsets.workItems,
+          position: index + offsets.workItems,
           plannedStart: w.plannedStart,
           plannedEnd: w.plannedEnd,
         })),
       });
     }
-    if (rows.materials.length > 0) {
+    if (materials.length > 0) {
       await tx.material.createMany({
-        data: rows.materials.map((m) => ({
+        data: materials.map((m, index) => ({
           projectId,
           phaseId: m.phaseId,
           name: m.name,
-          position: m.position + offsets.materials,
+          position: index + offsets.materials,
           leadTimeWeeks: m.leadTimeWeeks,
           orderByDate: m.orderByDate,
         })),
       });
     }
+
+    return {
+      designFiles: designFiles.length,
+      workItems: workItems.length,
+      materials: materials.length,
+      skipped:
+        rows.designFiles.length -
+        designFiles.length +
+        (rows.workItems.length - workItems.length) +
+        (rows.materials.length - materials.length),
+    };
   }
 
   async update(
@@ -703,4 +786,29 @@ function snapshot(project: {
     managerId: project.managerId,
     budgetAmount: project.budgetAmount,
   };
+}
+
+/** How many rows a template actually contributed, and how many it skipped. */
+interface TemplateInsertCounts {
+  designFiles: number;
+  workItems: number;
+  materials: number;
+  /** Rows the project already had under the same name and phase. */
+  skipped: number;
+}
+
+/**
+ * The comparison key: trimmed, case-folded name, scoped by phase where there is
+ * one. The separator is a NUL because it cannot occur in either part, so a
+ * phase id ending in text cannot run into a name beginning with it.
+ */
+function rowKey(name: string, phaseId?: string | null): string {
+  return `${phaseId ?? ''}\u0000${name.trim().toLowerCase()}`;
+}
+
+/** Takes a key if it is free, reporting whether the caller may use it. */
+function claim(seen: Set<string>, candidate: string): boolean {
+  if (seen.has(candidate)) return false;
+  seen.add(candidate);
+  return true;
 }

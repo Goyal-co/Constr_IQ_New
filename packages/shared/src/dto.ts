@@ -161,6 +161,7 @@ export type PhaseDto = z.infer<typeof phaseSchema>;
 
 export const updatePhaseSchema = phaseSchema.partial().extend({
   isArchived: z.boolean().optional(),
+  tracksDrawings: z.boolean().optional(),
 });
 export type UpdatePhaseDto = z.infer<typeof updatePhaseSchema>;
 

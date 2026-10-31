@@ -695,3 +695,45 @@
     display: inline-flex;
   }
 }
+
+/* ==========================================================================
+   Installed as an app
+   ========================================================================== */
+
+/* When launched from a home screen there is no browser chrome, so the app is
+   drawn under the status bar and, on a phone with a home indicator, over the
+   gesture area at the bottom. The browser does not pad for either: the viewport
+   meta says `viewport-fit=cover`, which is what lets the background reach the
+   edges, and the cost is that we owe the insets ourselves.
+
+   Scoped to `display-mode: standalone` so a normal tab is untouched — there the
+   browser's own chrome already occupies that space, and adding the inset on top
+   would leave a band of empty canvas under the address bar. */
+@media (display-mode: standalone), (display-mode: window-controls-overlay) {
+  .topbar {
+    padding-top: env(safe-area-inset-top);
+    /* The bar grows by the inset rather than letting its contents slide up
+       under the clock. */
+    height: calc(var(--topbar-height) + env(safe-area-inset-top));
+  }
+
+  .sidebar {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* Anything that pins itself to the viewport bottom clears the home
+     indicator; without this a primary action sits exactly where the
+     swipe-up gesture starts and becomes very hard to press. */
+  .modal-foot,
+  .bottom-bar {
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  }
+}
+
+/* A standalone window has no back button. The in-app one stops being a
+   convenience and becomes the only way back, so it is always shown there. */
+@media (display-mode: standalone) {
+  .back-link {
+    display: inline-flex;
+  }
+}

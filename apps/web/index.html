@@ -12,6 +12,21 @@
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8fa" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d111b" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Installable app. The manifest carries the icons, name and display mode
+         for Android and desktop Chrome; iOS ignores it and reads the two
+         apple-* tags below instead, which is why both sets are here. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ConstructIQ" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- A login-gated internal tool. Nothing here is for the open web, and a
+         crawler that reaches it should index none of it. robots.txt says the
+         same thing; this covers the case where somebody links straight in. -->
+    <meta name="robots" content="noindex, nofollow" />
     <title>Goyal &amp; Co. | Hariyana Group — Project Tracker</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -53,5 +68,24 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      /*
+       * Registers the service worker, which is what makes the app installable.
+       *
+       * After load, not during it: registration competes with the bundle for
+       * the network otherwise, and nothing on the first paint needs it.
+       *
+       * Only over HTTPS or on localhost, which is all the browser allows — the
+       * guard is here so the console stays clean on a plain-HTTP staging host
+       * rather than printing a SecurityError nobody can act on.
+       */
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function (error) {
+            console.warn('Service worker registration failed:', error);
+          });
+        });
+      }
+    </script>
   </body>
 </html>

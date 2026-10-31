@@ -424,46 +424,84 @@ function useProjectPhases(project: ProjectDetail): Phase[] {
  * The jump links stay: they scroll rather than switch, so they are a table of
  * contents rather than a filter.
  */
+/**
+ * Drawing: one sub-section at a time, chosen by a tab.
+ *
+ * These used to be stacked into a single long scroll with a jump-nav above
+ * them. On a phone that put the drawing register, and every phase, in one
+ * column you had to scroll past — and the jump links moved you somewhere the
+ * scrollbar then disagreed with. A tab shows one thing and nothing else, which
+ * is what the sections above already do, so the page now behaves the same way
+ * at both levels.
+ *
+ * Only phases with `tracksDrawings` appear. Not every trade is drawn: civil and
+ * MEP are issued from drawings, a finishing phase is usually built to a
+ * specification, and giving it a drawing tab asks a site team for an issue date
+ * that is never going to exist. The flag lives on the phase in Settings rather
+ * than in this file, so which phases are drawn is a decision the organisation
+ * records rather than one the code assumes.
+ */
 function DrawingSection({ project }: { project: ProjectDetail }) {
-  const phases = useProjectPhases(project);
+  const allPhases = useProjectPhases(project);
+  const phases = useMemo(() => allPhases.filter((p) => p.tracksDrawings), [allPhases]);
 
-  const jump = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  const tabs = useMemo(
+    () => [
+      {
+        id: 'files',
+        label: DESIGN_FILES_LABEL,
+        count: project.designFiles.length,
+        colour: null as string | null,
+      },
+      ...phases.map((phase) => ({
+        id: phase.id,
+        label: phase.name,
+        count: project.workItems.filter((w) => w.phase.id === phase.id).length,
+        colour: phase.colour,
+      })),
+    ],
+    [phases, project.designFiles.length, project.workItems],
+  );
+
+  const [active, setActive] = useState('files');
+
+  /**
+   * A tab that disappears must not leave the panel blank.
+   *
+   * Switching a phase off in Settings, or archiving it, removes its tab while
+   * somebody may be standing on it. Falling back to the register is better than
+   * rendering nothing and better than resetting on every render.
+   */
+  const current = tabs.some((tab) => tab.id === active) ? active : 'files';
+
+  const phase = phases.find((p) => p.id === current);
 
   return (
     <div className="stack gap-5">
-      {phases.length > 0 && (
-        <nav className="jump-nav no-print" aria-label="Jump to a drawing block">
-          <button type="button" onClick={() => jump('drawing-files')}>
-            {DESIGN_FILES_LABEL}
-            <span className="jump-count">{project.designFiles.length}</span>
+      <nav className="subnav no-print" role="tablist" aria-label="Drawing sub-section">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={current === tab.id}
+            className="subnav-item"
+            onClick={() => setActive(tab.id)}
+          >
+            {tab.colour && <span className="phase-swatch" style={{ background: tab.colour }} />}
+            {tab.label}
+            <span className="subnav-count">{tab.count}</span>
           </button>
-          {phases.map((phase) => (
-            <button key={phase.id} type="button" onClick={() => jump(`drawing-${phase.id}`)}>
-              <span className="phase-swatch" style={{ background: phase.colour }} />
-              {phase.name}
-              <span className="jump-count">
-                {project.workItems.filter((w) => w.phase.id === phase.id).length}
-              </span>
-            </button>
-          ))}
-        </nav>
-      )}
+        ))}
+      </nav>
 
-      <div id="drawing-files" className="scroll-anchor">
+      {current === 'files' ? (
         <DesignFilesPanel project={project} />
-      </div>
+      ) : phase ? (
+        <DesignPhasePanel project={project} phase={phase} />
+      ) : null}
 
-      {phases.length === 0 ? (
-        <NoPhasesYet />
-      ) : (
-        phases.map((phase) => (
-          <div key={phase.id} id={`drawing-${phase.id}`} className="scroll-anchor">
-            <DesignPhasePanel project={project} phase={phase} />
-          </div>
-        ))
-      )}
+      {allPhases.length === 0 && <NoPhasesYet />}
     </div>
   );
 }
