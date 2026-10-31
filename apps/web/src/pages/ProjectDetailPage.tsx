@@ -13,6 +13,7 @@ import {
   type Phase,
   type ProjectDetail,
   type WorkItem,
+  tracksDrawings,
 } from '@ciq/shared';
 import { ApiRequestError, downloadFile } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -162,7 +163,7 @@ export function ProjectDetailPage() {
    * that is the same object the sub-tabs filter on, so the two cannot drift.
    */
   const drawingCount =
-    project.designFiles.length + project.workItems.filter((w) => w.phase.tracksDrawings).length;
+    project.designFiles.length + project.workItems.filter((w) => tracksDrawings(w.phase)).length;
 
   const setSection = (id: SectionId) => {
     const next = new URLSearchParams(params);
@@ -459,7 +460,7 @@ function useProjectPhases(project: ProjectDetail): Phase[] {
  */
 function DrawingSection({ project }: { project: ProjectDetail }) {
   const allPhases = useProjectPhases(project);
-  const phases = useMemo(() => allPhases.filter((p) => p.tracksDrawings), [allPhases]);
+  const phases = useMemo(() => allPhases.filter(tracksDrawings), [allPhases]);
 
   const tabs = useMemo(
     () => [

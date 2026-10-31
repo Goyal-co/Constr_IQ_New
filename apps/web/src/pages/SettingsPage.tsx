@@ -12,6 +12,7 @@ import {
   type Phase,
   type TemplateDetail,
   type TemplateItemKind,
+  isNeverDrawn,
 } from '@ciq/shared';
 import { useAuth } from '@/lib/auth';
 import { useReorderable } from '@/lib/useReorderable';
@@ -495,22 +496,32 @@ function PhasesPanel() {
                       {phase.usageCount ?? 0}
                     </td>
                     <td data-label="Drawings">
-                      {/* Off removes this phase from the Drawing section. Its
-                          activities keep every execution date they have — only
-                          the drawing columns go away, so switching it back on
-                          restores them untouched. */}
-                      <label className="row gap-2 text-sm" style={{ cursor: 'pointer' }}>
-                        <Checkbox
-                          checked={phase.tracksDrawings}
-                          disabled={!editable}
-                          onChange={(next) =>
-                            updatePhase.mutate({ id: phase.id, tracksDrawings: next })
-                          }
-                          label={`${phase.name} tracks drawings`}
-                          title="Shows this phase as a tab in the Drawing section."
-                        />
-                        <span className="text-2xs text-tertiary">Tracks drawings</span>
-                      </label>
+                      {/* No toggle for a phase the application never draws.
+                          Showing one would be a control that saves and changes
+                          nothing, which is worse than no control — the reader
+                          would reasonably conclude the feature is broken rather
+                          than that the phase is excluded by design. */}
+                      {isNeverDrawn(phase.name) ? (
+                        <span
+                          className="text-2xs text-tertiary"
+                          title="Finishing work is built to a specification, not issued from drawings."
+                        >
+                          Not drawn
+                        </span>
+                      ) : (
+                        <label className="row gap-2 text-sm" style={{ cursor: 'pointer' }}>
+                          <Checkbox
+                            checked={phase.tracksDrawings}
+                            disabled={!editable}
+                            onChange={(next) =>
+                              updatePhase.mutate({ id: phase.id, tracksDrawings: next })
+                            }
+                            label={`${phase.name} tracks drawings`}
+                            title="Shows this phase as a tab in the Drawing section."
+                          />
+                          <span className="text-2xs text-tertiary">Tracks drawings</span>
+                        </label>
+                      )}
                     </td>
                     <td data-label="Status">
                       {phase.isArchived ? (

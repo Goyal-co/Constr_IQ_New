@@ -270,3 +270,39 @@ export const PHASE_COLOUR_CHOICES = [
   '#5b7083',
   '#b4459b',
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Drawing track
+// ---------------------------------------------------------------------------
+
+/**
+ * Phases that are never issued from drawings, by name.
+ *
+ * Finishing work is built to a specification, not to a drawing: there is no
+ * drawing to issue, so a drawing sub-section for it asks a site team to tick an
+ * issue date that will never exist. Every project this product is used for
+ * works that way, so it is a property of the domain rather than of one
+ * organisation's configuration, and it lives in code.
+ *
+ * Compared case-insensitively against the trimmed phase name. Renaming the
+ * phase to something not in this list WILL bring its drawing tab back — that is
+ * the known cost of identifying a phase by its name, and the reason
+ * `tracksDrawings` still exists for every other phase.
+ */
+export const PHASES_WITHOUT_DRAWINGS: readonly string[] = ['finishing'];
+
+/** Whether a phase can ever appear in the Drawing section. */
+export function isNeverDrawn(phaseName: string): boolean {
+  return PHASES_WITHOUT_DRAWINGS.includes(phaseName.trim().toLowerCase());
+}
+
+/**
+ * Whether a phase appears in the Drawing section right now.
+ *
+ * Two gates, and the order matters: the hard-coded rule above wins, and only
+ * then does the per-phase setting apply. Settings never offers the toggle for a
+ * never-drawn phase, so the setting cannot be seen to disagree with the rule.
+ */
+export function tracksDrawings(phase: { name: string; tracksDrawings: boolean }): boolean {
+  return !isNeverDrawn(phase.name) && phase.tracksDrawings;
+}
