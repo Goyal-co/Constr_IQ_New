@@ -1709,46 +1709,60 @@ function AddMaterialForm({ project, phases }: { project: ProjectDetail; phases: 
 // ---------------------------------------------------------------------------
 
 /**
- * Execution, stacked like Drawing.
+ * Execution: one phase at a time, chosen by a tab.
  *
- * Same reasoning: Civil and Finishing are read together, and a tab hid whatever
- * was outstanding in the other one. The Timeline that used to head this section
- * now sits above the tabs, where it describes the whole project.
+ * Every phase appears here, including ones switched off in Drawing. Whether a
+ * trade is drawn and whether it is built are different questions, and a
+ * finishing phase with no drawings still has a start date, an end date and
+ * somebody standing on site doing it.
+ *
+ * The Timeline above the tabs is what shows the phases together, so nothing is
+ * lost by only rendering one panel here — it is the comparison view, and it is
+ * on screen at the same time.
  */
 function ExecutionSection({ project }: { project: ProjectDetail }) {
   const phases = useProjectPhases(project);
+  const [active, setActive] = useState<string | null>(null);
+
+  // Falls back rather than resetting, so archiving the phase somebody is
+  // standing on does not leave an empty panel.
+  const current = phases.some((p) => p.id === active) ? active : (phases[0]?.id ?? null);
+  const phase = phases.find((p) => p.id === current);
 
   if (phases.length === 0) return <NoPhasesYet />;
 
-  const jump = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-
   return (
     <div className="stack gap-5">
+      {/* One phase needs no switcher — the tab strip would say only what the
+          panel below it already says. */}
       {phases.length > 1 && (
-        <nav className="jump-nav no-print" aria-label="Jump to a phase">
-          {phases.map((phase) => (
-            <button key={phase.id} type="button" onClick={() => jump(`execution-${phase.id}`)}>
-              <span className="phase-swatch" style={{ background: phase.colour }} />
-              {phase.name}
-              <span className="jump-count">
-                {project.workItems.filter((w) => w.phase.id === phase.id).length}
+        <nav className="subnav no-print" role="tablist" aria-label="Phase">
+          {phases.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              role="tab"
+              aria-selected={current === option.id}
+              className="subnav-item"
+              onClick={() => setActive(option.id)}
+            >
+              <span className="phase-swatch" style={{ background: option.colour }} />
+              {option.name}
+              <span className="subnav-count">
+                {project.workItems.filter((w) => w.phase.id === option.id).length}
               </span>
             </button>
           ))}
         </nav>
       )}
 
-      {phases.map((phase) => (
-        <div key={phase.id} id={`execution-${phase.id}`} className="scroll-anchor">
-          <ExecutionPhasePanel
-            project={project}
-            phase={phase}
-            items={project.workItems.filter((w) => w.phase.id === phase.id)}
-          />
-        </div>
-      ))}
+      {phase && (
+        <ExecutionPhasePanel
+          project={project}
+          phase={phase}
+          items={project.workItems.filter((w) => w.phase.id === phase.id)}
+        />
+      )}
     </div>
   );
 }
